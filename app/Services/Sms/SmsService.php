@@ -1,0 +1,112 @@
+<?php
+
+namespace App\Services;
+
+use App\Contracts\Sms\SmsGatewayInterface;
+use App\DTOs\Sms\SmsMessageDTO;
+use App\Models\Voucher;
+use Illuminate\Support\Facades\Log;
+
+class SmsService
+{
+    private SmsGatewayInterface $smsGateway;
+
+    public function __construct(SmsGatewayInterface $smsGateway)
+    {
+        $this->smsGateway = $smsGateway;
+    }
+
+    public function sendVoucher(string $phone, Voucher $voucher): bool
+    {
+        try {
+            $message = $this->generateVoucherMessage($voucher);
+
+            $smsDTO = new SmsMessageDTO(
+                recipient: $phone,
+                content: $message,
+                senderId: config('services.ugsms.sender_id', 'BILLING'),
+                isUnicode: false,
+                options: [
+                    'message_type' => 'voucher_delivery',
+                    'voucher_id' => $voucher->id
+                ]
+            );
+
+            $sent = $this->smsGateway->send($smsDTO);
+
+            if ($sent) {
+                Log::channel('sms')->info('Voucher SMS sent', [
+                    'voucher_id' => $voucher->id,
+                    'phone' => $phone,
+                    'voucher_code' => $voucher->code
+                ]);
+
+                $voucher->update(['sms_sent_at' => now()]);
+            }
+
+            return $sent;
+
+        } catch (\Exception $e) {
+            Log::channel('sms')->error('Failed to send voucher SMS', [
+                'voucher_id' => $voucher->id,
+                'phone' => $phone,
+                'error' => $e->getMessage()
+            ]);
+
+            return false;
+        }
+    }
+
+    public function sendPaymentConfirmation(string $phone, float $amount, string $transactionId): bool
+    {
+        $message = "Payment of UGX " . number_format($amount) . " received. Transaction ID: {$transactionId}. Voucher will be sent shortly.";
+
+        $smsDTO = new SmsMessageDTO(
+            recipient: $phone,
+            content: $message,
+            senderId: config('services.ugsms.sender_id', 'BILLING')
+        );
+
+        return $this->smsGateway->send($smsDTO);
+    }
+
+    public function sendLowBalanceAlert(float $balance): bool
+    {
+        $adminPhone = config('app.admin_phone');
+
+        if (!$adminPhone) {
+            return false;
+        }
+
+        $message = "ALERT: SMS balance is low. Current balance: UGX " . number_format($balance) . ". Please top up.";
+
+        $smsDTO = new SmsMessageDTO(
+            recipient: $adminPhone,
+            content: $message,
+            senderId: 'ALERT'
+        );
+
+        return $this->smsGateway->send($smsDTO);
+    }
+
+    private function generateVoucherMessage(Voucher $voucher): string
+    {
+        return "Your internet voucher:\n"
+            . "Code: {$voucher->code}\n"
+            . "Password: {$voucher->password}\n"
+            . "Valid for: {$voucher->validity_hours} hours\n"
+            . "Profile: {$voucher->profile}\n"
+            . "Expires: {$voucher->expires_at->format('Y-m-d H:i')}\n"
+            . "Thank you for your payment!";
+    }
+
+    public function checkBalance(): float
+    {
+        return $this->smsGateway->getBalance();
+    }
+
+    public function getMessageCost(string $message): float
+    {
+        return $this->smsGateway->getMessageCost(strlen($message));
+    }
+}
