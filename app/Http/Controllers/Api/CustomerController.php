@@ -1083,6 +1083,99 @@ class CustomerController extends Controller
     }
 
     /**
+     * Get customer SMS history
+     */
+    public function smsHistory(Request $request, string $id): JsonResponse
+    {
+        try {
+            // Find customer
+            $customer = Customer::where('id', $id);
+
+            // Scope by tenant if current tenant exists
+            if ($this->currentTenant) {
+                $customer->where('tenant_id', $this->currentTenant->id);
+            }
+
+            $customer = $customer->first();
+
+            if (!$customer) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Customer not found'
+                ], 404);
+            }
+
+            // Get SMS logs for this customer
+            $smsLogs = \App\Models\SmsLog::where('customer_id', $customer->id)
+                ->orderBy('created_at', 'desc')
+                ->get()
+                ->map(function ($log) {
+                    return [
+                        'id' => $log->id,
+                        'recipient' => $log->recipient,
+                        'message' => $log->content, // Map content to message for frontend compatibility
+                        'message_type' => $log->metadata['message_type'] ?? null,
+                        'status' => $log->status,
+                        'delivery_status' => $log->delivery_status ?? $log->status,
+                        'cost' => $log->cost,
+                        'currency' => $log->currency ?? 'UGX',
+                        'provider' => $log->provider,
+                        'provider_message_id' => $log->message_id,
+                        'provider_response' => $log->provider_response,
+                        'metadata' => $log->metadata,
+                        'sent_at' => $log->sent_at?->toISOString(),
+                        'delivered_at' => $log->delivered_at?->toISOString(),
+                        'failed_at' => $log->failed_at?->toISOString(),
+                        'created_at' => $log->created_at->toISOString(),
+                        'updated_at' => $log->updated_at->toISOString()
+                    ];
+                });
+
+            // Calculate summary statistics
+            $totalMessages = $smsLogs->count();
+            $deliveredMessages = $smsLogs->where('status', 'delivered')->count();
+            $pendingMessages = $smsLogs->where('status', 'pending')->count() + 
+                              $smsLogs->where('status', 'sent')->where('delivery_status', 'pending')->count();
+            $failedMessages = $smsLogs->where('status', 'failed')->count();
+            $totalCost = $smsLogs->sum('cost');
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'customer' => [
+                        'id' => $customer->id,
+                        'name' => $customer->name,
+                        'phone' => $customer->phone,
+                        'email' => $customer->email
+                    ],
+                    'sms_logs' => $smsLogs->values()->toArray(),
+                    'summary' => [
+                        'total_messages' => $totalMessages,
+                        'delivered_messages' => $deliveredMessages,
+                        'pending_messages' => $pendingMessages,
+                        'failed_messages' => $failedMessages,
+                        'total_cost' => $totalCost,
+                        'currency' => 'UGX'
+                    ]
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch customer SMS history', [
+                'customer_id' => $id,
+                'tenant_id' => $this->currentTenant?->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch SMS history',
+                'error' => config('app.debug') ? $e->getMessage() : null
+            ], 500);
+        }
+    }
+
+    /**
      * Get customer statistics
      */
     public function statistics(Request $request): JsonResponse

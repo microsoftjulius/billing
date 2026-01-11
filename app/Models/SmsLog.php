@@ -12,6 +12,8 @@ class SmsLog extends BaseModel
     protected $fillable = [
         'uuid',
         'customer_id',
+        'smsable_type',
+        'smsable_id',
         'recipient',
         'content',
         'sender_id',

@@ -12,6 +12,7 @@
           </i>
         </div>
         <div class="social-links d-none d-md-flex align-items-center">
+          <ThemeToggle class="me-3" />
           <a href="#!" class="twitter nav-link"><i class="bi bi-twitter-x"></i></a>
           <a href="#!" class="facebook nav-link"><i class="bi bi-facebook"></i></a>
           <a href="#!" class="instagram nav-link"><i class="bi bi-instagram"></i></a>
@@ -82,7 +83,7 @@
 </template>
 
 <script setup>
-// No script needed for now
+import ThemeToggle from '@/components/common/ThemeToggle.vue'
 </script>
 
 <style scoped>

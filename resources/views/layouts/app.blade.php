@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Landing Page</title>
+    <title>{{ config('app.name', 'BillingSystem') }}</title>
 
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com" rel="preconnect">
@@ -22,7 +22,7 @@
     <link href="{{ asset('assets/css/main.css') }}" rel="stylesheet">
 
     <!-- Vite JS -->
-    @vite('resources/js/app.js')
+    @vite('resources/js/app.ts')
 </head>
 <body>
     @yield('content')

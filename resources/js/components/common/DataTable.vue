@@ -97,16 +97,35 @@
 
                     <div class="table-actions">
                         <slot name="actions">
-                            <button
-                                v-if="showExport"
-                                class="action-btn export-btn"
-                                @click="exportData"
-                                title="Export data"
-                            >
-                                <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                            </button>
+                            <div v-if="showExport" class="export-dropdown">
+                                <button
+                                    class="action-btn export-btn"
+                                    @click="toggleExportMenu"
+                                    title="Export data"
+                                >
+                                    <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </button>
+
+                                <div v-if="exportMenuOpen" class="export-menu" v-click-outside="closeExportMenu">
+                                    <button class="export-option" @click="exportToCSV">
+                                        <svg class="option-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        </svg>
+                                        Export as CSV
+                                    </button>
+                                    <button class="export-option" @click="exportData">
+                                        <svg class="option-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        </svg>
+                                        Custom Export
+                                    </button>
+                                </div>
+                            </div>
 
                             <button
                                 v-if="showRefresh"
@@ -282,7 +301,7 @@
                             >
                                 <slot :name="`cell(${column.key})`" :row="row" :value="row[column.key]">
                                     <template v-if="column.format">
-                                        {{ formatCell(row[column.key], column.format, row) }}
+                                        <span v-html="highlightSearchTerm(formatCell(row[column.key], column.format, row))"></span>
                                     </template>
                                     <template v-else-if="column.render">
                                         <component
@@ -292,7 +311,7 @@
                                         />
                                     </template>
                                     <template v-else>
-                                        {{ row[column.key] }}
+                                        <span v-html="highlightSearchTerm(String(row[column.key] || ''))"></span>
                                     </template>
                                 </slot>
                             </td>
@@ -358,16 +377,16 @@
             <div class="footer-left">
                 <div v-if="showPageSize" class="page-size-selector">
                     <span class="page-size-label">Show</span>
-                    <select v-model="pageSize" class="page-size-select" @change="handlePageSizeChange">
+                    <select :value="internalPageSize" class="page-size-select" @change="handlePageSizeChange">
                         <option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option>
                     </select>
                     <span class="page-size-label">entries</span>
                 </div>
 
                 <div class="row-count">
-                    Showing {{ showingFrom }} to {{ showingTo }} of {{ totalRows }} entries
-                    <span v-if="filteredRows !== totalRows" class="filtered-count">
-            (filtered from {{ totalRows }} total entries)
+                    Showing {{ showingFrom }} to {{ showingTo }} of {{ totalRowsCount }} entries
+                    <span v-if="filteredRows !== totalRowsCount" class="filtered-count">
+            (filtered from {{ totalRowsCount }} total entries)
           </span>
                 </div>
             </div>
@@ -445,7 +464,18 @@
 </template>
 
 <script>
-import { debounce } from 'lodash'
+// Simple debounce implementation
+function debounce(func, wait) {
+    let timeout
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout)
+            func(...args)
+        }
+        clearTimeout(timeout)
+        timeout = setTimeout(later, wait)
+    }
+}
 
 export default {
     name: 'DataTable',
@@ -584,6 +614,7 @@ export default {
             filterValues: {},
             columnFilters: {},
             filterPanelOpen: false,
+            exportMenuOpen: false,
 
             // Selection
             selectedRows: [],
@@ -607,7 +638,9 @@ export default {
 
         // Filtering & Sorting
         filteredData() {
-            let data = [...this.data]
+            // Force reactivity by accessing data prop directly
+            const currentData = this.data
+            let data = [...currentData]
 
             // Apply search
             if (this.searchQuery) {
@@ -672,7 +705,7 @@ export default {
             return this.filteredData.length
         },
 
-        totalRows() {
+        totalRowsCount() {
             return this.totalRows !== null ? this.totalRows : this.data.length
         },
 
@@ -776,6 +809,10 @@ export default {
         data: {
             handler() {
                 this.resetSelection()
+                // Force reactivity update for filtered data
+                this.$nextTick(() => {
+                    this.$forceUpdate()
+                })
             },
             deep: true
         },
@@ -799,13 +836,13 @@ export default {
     created() {
         // Initialize filter values
         this.filters.forEach(filter => {
-            this.$set(this.filterValues, filter.key, '')
+            this.filterValues[filter.key] = ''
         })
 
         // Initialize column filters
         this.columns.forEach(column => {
             if (column.filterable) {
-                this.$set(this.columnFilters, column.key, '')
+                this.columnFilters[column.key] = ''
             }
         })
 
@@ -959,6 +996,15 @@ export default {
             this.filterPanelOpen = false
         },
 
+        // Export menu
+        toggleExportMenu() {
+            this.exportMenuOpen = !this.exportMenuOpen
+        },
+
+        closeExportMenu() {
+            this.exportMenuOpen = false
+        },
+
         // Pagination
         goToPage(page) {
             if (page < 1 || page > this.totalPages || page === this.internalPage) return
@@ -968,7 +1014,8 @@ export default {
             this.scrollToTop()
         },
 
-        handlePageSizeChange() {
+        handlePageSizeChange(event) {
+            this.internalPageSize = parseInt(event.target.value)
             this.internalPage = 1
             this.$emit('page-size-change', this.internalPageSize)
         },
@@ -1023,6 +1070,71 @@ export default {
                 data: this.filteredData,
                 selected: this.selectedRowsData
             })
+        },
+
+        exportToCSV() {
+            const data = this.filteredData
+            if (data.length === 0) return
+
+            // Get column headers
+            const headers = this.visibleColumns.map(col => col.title).join(',')
+            
+            // Convert data to CSV rows
+            const rows = data.map(row => {
+                return this.visibleColumns.map(col => {
+                    let value = row[col.key]
+                    if (value == null) value = ''
+                    
+                    // Format value if formatter exists
+                    if (col.format) {
+                        value = this.formatCell(value, col.format, row)
+                    }
+                    
+                    // Escape CSV special characters
+                    value = String(value)
+                    if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+                        value = `"${value.replace(/"/g, '""')}"`
+                    }
+                    
+                    return value
+                }).join(',')
+            })
+
+            // Combine headers and rows
+            const csvContent = [headers, ...rows].join('\n')
+            
+            // Create and download file
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+            const link = document.createElement('a')
+            const url = URL.createObjectURL(blob)
+            
+            link.setAttribute('href', url)
+            link.setAttribute('download', `export-${new Date().toISOString().split('T')[0]}.csv`)
+            link.style.visibility = 'hidden'
+            
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+        },
+
+        highlightSearchTerm(text) {
+            if (!this.searchQuery || !text) {
+                return text
+            }
+
+            const searchTerm = this.searchQuery.trim()
+            if (!searchTerm) {
+                return text
+            }
+
+            // Escape special regex characters in search term
+            const escapedSearchTerm = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            
+            // Create regex for case-insensitive search
+            const regex = new RegExp(`(${escapedSearchTerm})`, 'gi')
+            
+            // Replace matches with highlighted version
+            return text.replace(regex, '<mark class="search-highlight">$1</mark>')
         }
     }
 }
@@ -1394,6 +1506,68 @@ export default {
 
 .animate-spin {
     animation: spin 1s linear infinite;
+}
+
+/* Export dropdown */
+.export-dropdown {
+    position: relative;
+}
+
+.export-btn {
+    width: auto;
+    padding: 0 8px;
+    gap: 4px;
+}
+
+.dropdown-arrow {
+    width: 12px;
+    height: 12px;
+}
+
+.export-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    z-index: 100;
+    min-width: 160px;
+    animation: slideDown 0.2s ease;
+}
+
+.export-option {
+    width: 100%;
+    padding: 8px 12px;
+    border: none;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.875rem;
+    color: #374151;
+    transition: background 0.2s ease;
+}
+
+.export-option:hover {
+    background: #f3f4f6;
+}
+
+.export-option:first-child {
+    border-radius: 6px 6px 0 0;
+}
+
+.export-option:last-child {
+    border-radius: 0 0 6px 6px;
+}
+
+.option-icon {
+    width: 16px;
+    height: 16px;
 }
 
 /* Table Container */
@@ -1828,6 +2002,21 @@ export default {
 .slide-fade-leave-to {
     opacity: 0;
     transform: translateY(-10px);
+}
+
+/* Search highlighting */
+.search-highlight {
+    background-color: #fef3c7;
+    color: #92400e;
+    padding: 1px 2px;
+    border-radius: 2px;
+    font-weight: 500;
+}
+
+/* Dark theme search highlighting */
+[data-theme="dark"] .search-highlight {
+    background-color: #451a03;
+    color: #fbbf24;
 }
 
 /* Responsive */

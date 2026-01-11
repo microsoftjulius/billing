@@ -95,6 +95,9 @@ class SettingController extends Controller
             // Group settings by category
             $groupedSettings = $this->groupSettingsByCategory($allSettings);
 
+            // Mask sensitive settings for API response
+            $maskedSettings = $this->maskSensitiveSettingsInGroups($groupedSettings);
+
             // Get system information
             $systemInfo = $this->getSystemInformation();
 
@@ -106,7 +109,7 @@ class SettingController extends Controller
                     'name' => $this->currentTenant->name,
                 ],
                 'data' => [
-                    'settings' => $groupedSettings,
+                    'settings' => $maskedSettings,
                     'system_info' => $systemInfo,
                     'service_status' => $this->getServiceStatus(),
                     'last_updated' => TenantSetting::where('tenant_id', $this->currentTenant->id)
@@ -146,14 +149,14 @@ class SettingController extends Controller
             $validator = Validator::make($request->all(), [
                 'settings' => 'required|array',
                 'settings.payment' => 'nullable|array',
-                'settings.payment.api_key' => 'nullable|string|min:10',
-                'settings.payment.api_secret' => 'nullable|string|min:10',
+                'settings.payment.api_key' => 'nullable|string|min:10|max:255',
+                'settings.payment.api_secret' => 'nullable|string|min:10|max:255',
                 'settings.payment.callback_url' => 'nullable|url',
                 'settings.payment.enabled' => 'boolean',
                 'settings.payment.test_mode' => 'boolean',
                 'settings.sms' => 'nullable|array',
-                'settings.sms.provider' => 'nullable|string|in:africas_talking,smpp,custom',
-                'settings.sms.api_key' => 'nullable|string|min:10',
+                'settings.sms.provider' => 'nullable|string|in:africas_talking,smpp,custom,ugsms',
+                'settings.sms.api_key' => 'nullable|string|min:10|max:255',
                 'settings.sms.username' => 'nullable|string',
                 'settings.sms.short_code' => 'nullable|string|max:20',
                 'settings.sms.enabled' => 'boolean',
@@ -161,7 +164,7 @@ class SettingController extends Controller
                 'settings.router.host' => 'nullable|string',
                 'settings.router.port' => 'nullable|integer|min:1|max:65535',
                 'settings.router.username' => 'nullable|string',
-                'settings.router.password' => 'nullable|string',
+                'settings.router.password' => 'nullable|string|min:6|max:255',
                 'settings.router.ssl' => 'boolean',
                 'settings.router.enabled' => 'boolean',
                 'settings.general' => 'nullable|array',
@@ -197,6 +200,13 @@ class SettingController extends Controller
                     $fullKey = $category . '.' . $key;
 
                     try {
+                        // Validate API key format for sensitive keys
+                        if ($this->isSensitiveKey($fullKey) && !empty($value)) {
+                            if (!$this->validateApiKeyFormat($fullKey, $value)) {
+                                throw new \InvalidArgumentException("Invalid API key format for {$fullKey}");
+                            }
+                        }
+
                         // Update or create setting
                         $setting = TenantSetting::updateOrCreate(
                             [
@@ -215,7 +225,7 @@ class SettingController extends Controller
                         Log::channel('settings')->debug('Setting updated', [
                             'tenant_id' => $this->currentTenant->id,
                             'key' => $fullKey,
-                            'value' => is_array($value) ? json_encode($value) : $value,
+                            'value' => $this->isSensitiveKey($fullKey) ? '***MASKED***' : $value,
                             'updated_by' => auth()->id(),
                         ]);
 
@@ -249,7 +259,7 @@ class SettingController extends Controller
                 'success' => true,
                 'message' => 'Settings updated successfully',
                 'data' => [
-                    'updated_settings' => $updatedSettings,
+                    'updated_settings' => $this->maskSensitiveSettings($updatedSettings),
                     'failed_updates' => $failedUpdates,
                     'total_updated' => count($updatedSettings),
                     'timestamp' => now()->toISOString(),
@@ -1063,5 +1073,147 @@ class SettingController extends Controller
                 'enabled' => false,
             ], $settings);
         });
+    }
+
+    /**
+     * Check if a key contains sensitive information
+     */
+    private function isSensitiveKey(string $key): bool
+    {
+        $sensitivePatterns = [
+            'api_key',
+            'api_secret',
+            'password',
+            'secret',
+            'token',
+            'private_key',
+        ];
+
+        foreach ($sensitivePatterns as $pattern) {
+            if (str_contains(strtolower($key), $pattern)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Validate API key format
+     */
+    private function validateApiKeyFormat(string $key, string $value): bool
+    {
+        // Basic validation rules
+        if (strlen($value) < 10 || strlen($value) > 255) {
+            return false;
+        }
+
+        // Check for invalid characters (spaces, special chars except underscore and dash)
+        if (!preg_match('/^[a-zA-Z0-9_\-]+$/', $value)) {
+            return false;
+        }
+
+        // Service-specific validation
+        if (str_contains($key, 'payment')) {
+            return $this->validatePaymentApiKey($value);
+        }
+
+        if (str_contains($key, 'sms')) {
+            return $this->validateSmsApiKey($value);
+        }
+
+        return true;
+    }
+
+    /**
+     * Validate payment API key format
+     */
+    private function validatePaymentApiKey(string $value): bool
+    {
+        // CollectUG API keys typically start with pk_ or sk_
+        $validPrefixes = ['pk_', 'sk_', 'api_', 'collect_'];
+        
+        foreach ($validPrefixes as $prefix) {
+            if (str_starts_with($value, $prefix)) {
+                // Must have content after prefix
+                return strlen($value) > strlen($prefix) + 5;
+            }
+        }
+
+        // Allow generic API keys without specific prefix
+        return strlen($value) >= 16;
+    }
+
+    /**
+     * Validate SMS API key format
+     */
+    private function validateSmsApiKey(string $value): bool
+    {
+        // UGSMS and other SMS providers
+        $validPrefixes = ['sms_', 'ugsms_', 'AT_', 'api_'];
+        
+        foreach ($validPrefixes as $prefix) {
+            if (str_starts_with($value, $prefix)) {
+                // Must have content after prefix
+                return strlen($value) > strlen($prefix) + 5;
+            }
+        }
+
+        // Allow generic API keys without specific prefix
+        return strlen($value) >= 12;
+    }
+
+    /**
+     * Mask sensitive settings for API response
+     */
+    private function maskSensitiveSettings(array $settings): array
+    {
+        $masked = [];
+        
+        foreach ($settings as $key => $value) {
+            if ($this->isSensitiveKey($key)) {
+                $masked[$key] = $this->maskApiKey($value);
+            } else {
+                $masked[$key] = $value;
+            }
+        }
+
+        return $masked;
+    }
+
+    /**
+     * Mask API key for display
+     */
+    private function maskApiKey(string $value): string
+    {
+        if (strlen($value) <= 8) {
+            // For short values, show first 2 and last 2 characters
+            return substr($value, 0, 2) . str_repeat('*', max(1, strlen($value) - 4)) . substr($value, -2);
+        } else {
+            // For longer values, show first 4 and last 4 characters
+            return substr($value, 0, 4) . str_repeat('*', max(1, strlen($value) - 8)) . substr($value, -4);
+        }
+    }
+
+    /**
+     * Mask sensitive settings in grouped format
+     */
+    private function maskSensitiveSettingsInGroups(array $groupedSettings): array
+    {
+        $masked = [];
+        
+        foreach ($groupedSettings as $category => $settings) {
+            $masked[$category] = [];
+            foreach ($settings as $key => $value) {
+                $fullKey = $category . '.' . $key;
+                if ($this->isSensitiveKey($fullKey)) {
+                    $masked[$category][$key] = $this->maskApiKey($value);
+                } else {
+                    $masked[$category][$key] = $value;
+                }
+            }
+        }
+
+        return $masked;
     }
 }

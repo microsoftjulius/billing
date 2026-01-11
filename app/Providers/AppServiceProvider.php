@@ -6,6 +6,7 @@ use App\Contracts\Payment\PaymentGatewayInterface;
 use App\Contracts\Sms\SmsGatewayInterface;
 use App\Services\Payment\CollectUgService;
 use App\Services\Sms\UgSmsService;
+use App\Services\SmsService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
@@ -31,6 +32,13 @@ class AppServiceProvider extends ServiceProvider
         // SMS Gateway Binding
         $this->app->bind(SmsGatewayInterface::class, function ($app) {
             return new UgSmsService(config('services.ugsms'));
+        });
+
+        // SMS Service Binding
+        $this->app->bind(\App\Services\SmsService::class, function ($app) {
+            return new \App\Services\SmsService(
+                $app->make(SmsGatewayInterface::class)
+            );
         });
 
         // Register repositories

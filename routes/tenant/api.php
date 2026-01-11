@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\SmsController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\PaymentGatewayController;
 use App\Http\Controllers\Api\VoucherController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\DashboardController;
@@ -53,6 +54,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/vouchers/batch-generate', [VoucherController::class, 'batchGenerate'])->name('tenant.vouchers.batch-generate');
         Route::post('/vouchers/{voucher}/disable', [VoucherController::class, 'disable'])->name('tenant.vouchers.disable');
         Route::post('/vouchers/{voucher}/extend', [VoucherController::class, 'extend'])->name('tenant.vouchers.extend');
+        Route::post('/vouchers/{voucher}/resend-sms', [VoucherController::class, 'resendSms'])->name('tenant.vouchers.resend-sms');
         Route::get('/vouchers/{voucher}/usage', [VoucherController::class, 'usage'])->name('tenant.vouchers.usage');
         Route::get('/vouchers/statistics', [VoucherController::class, 'statistics'])->name('tenant.vouchers.statistics');
         Route::get('/vouchers/export', [VoucherController::class, 'export'])->name('tenant.vouchers.export');
@@ -62,6 +64,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/customers/{customer}/payments', [CustomerController::class, 'payments'])->name('tenant.customers.payments');
         Route::get('/customers/{customer}/vouchers', [CustomerController::class, 'vouchers'])->name('tenant.customers.vouchers');
         Route::get('/customers/{customer}/activity', [CustomerController::class, 'activity'])->name('tenant.customers.activity');
+        Route::get('/customers/{customer}/sms-history', [CustomerController::class, 'smsHistory'])->name('tenant.customers.sms-history');
         Route::get('/customers/statistics', [CustomerController::class, 'statistics'])->name('tenant.customers.statistics');
         Route::get('/customers/export', [CustomerController::class, 'export'])->name('tenant.customers.export');
 
@@ -102,9 +105,31 @@ Route::prefix('v1')->group(function () {
             Route::post('/settings/test-router', [SettingController::class, 'testRouter'])->name('tenant.settings.test-router');
         });
 
+        // Payment Gateways
+        Route::middleware(['tenant.admin'])->group(function () {
+            Route::apiResource('payment-gateways', PaymentGatewayController::class);
+            Route::patch('/payment-gateways/{paymentGateway}/toggle', [PaymentGatewayController::class, 'toggle'])->name('tenant.payment-gateways.toggle');
+            Route::post('/payment-gateways/{paymentGateway}/test', [PaymentGatewayController::class, 'test'])->name('tenant.payment-gateways.test');
+            Route::post('/payment-gateways/test', [PaymentGatewayController::class, 'test'])->name('tenant.payment-gateways.test-config');
+            Route::get('/payment-gateways/{paymentGateway}/statistics', [PaymentGatewayController::class, 'statistics'])->name('tenant.payment-gateways.statistics');
+        });
+
         // SMS
         Route::get('/sms/balance', [SmsController::class, 'balance'])->name('tenant.sms.balance');
         Route::get('/sms/logs', [SmsController::class, 'logs'])->name('tenant.sms.logs');
+        Route::post('/sms/send', [SmsController::class, 'send'])->name('tenant.sms.send');
+        Route::post('/sms/send-bulk', [SmsController::class, 'sendBulk'])->name('tenant.sms.send-bulk');
+        Route::post('/sms/retry', [SmsController::class, 'retry'])->name('tenant.sms.retry');
+        Route::get('/sms/status/{messageId}', [SmsController::class, 'getStatus'])->name('tenant.sms.status');
+        Route::patch('/sms/update-status/{messageId}', [SmsController::class, 'updateStatus'])->name('tenant.sms.update-status');
+        Route::post('/sms/webhook', [SmsController::class, 'webhook'])->name('tenant.sms.webhook');
+        Route::post('/sms/calculate-cost', [SmsController::class, 'calculateCost'])->name('tenant.sms.calculate-cost');
+        Route::post('/sms/check-balance-alert', [SmsController::class, 'checkBalanceAlert'])->name('tenant.sms.check-balance-alert');
+        Route::get('/sms/templates', [SmsController::class, 'templates'])->name('tenant.sms.templates');
+        Route::get('/sms/templates/{templateId}/preview', [SmsController::class, 'templatePreview'])->name('tenant.sms.template-preview');
+        Route::get('/sms/configuration', [SmsController::class, 'configuration'])->name('tenant.sms.configuration');
+        Route::put('/sms/configuration', [SmsController::class, 'updateConfiguration'])->name('tenant.sms.update-configuration');
+        Route::post('/sms/test-configuration', [SmsController::class, 'testConfiguration'])->name('tenant.sms.test-configuration');
 
         // Search endpoints
         Route::get('/search/customers/{query}', [CustomerController::class, 'search'])->name('tenant.search.customers');

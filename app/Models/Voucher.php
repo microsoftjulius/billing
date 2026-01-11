@@ -4,9 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class Voucher extends BaseModel
 {
+    use HasFactory;
     protected $table = 'vouchers';
 
     protected $fillable = [

@@ -566,6 +566,8 @@ class VoucherService
                             // Create in database
                             $voucher = VoucherModel::create([
                                 'uuid' => Str::orderedUuid(),
+                                'customer_id' => null, // No customer in batch generation
+                                'payment_id' => null,  // No payment in batch generation
                                 'code' => $code,
                                 'password' => $password,
                                 'profile' => $profile,
@@ -600,7 +602,9 @@ class VoucherService
                     }
 
                 } catch (\Exception $e) {
+                    $quantity = (int) ($item['quantity'] ?? 1);
                     $results['failed'] += $quantity;
+                    $results['total'] += $quantity;
                     $results['errors'][] = "Batch item failed: " . $e->getMessage();
                 }
             }

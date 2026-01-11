@@ -11,6 +11,7 @@ use App\Models\Payment;
 use App\Models\Customer;
 use App\Models\Tenant;
 use App\Services\Payment\CollectUgService;
+use App\Services\Payment\PaymentGatewayManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -19,12 +20,12 @@ use Illuminate\Http\Request;
 
 class PaymentController extends Controller
 {
-    private PaymentGatewayInterface $paymentGateway;
+    private PaymentGatewayManager $gatewayManager;
     private ?Tenant $currentTenant;
 
-    public function __construct(PaymentGatewayInterface $paymentGateway)
+    public function __construct(PaymentGatewayManager $gatewayManager)
     {
-        $this->paymentGateway = $paymentGateway;
+        $this->gatewayManager = $gatewayManager;
         $this->currentTenant = $this->resolveTenant();
     }
 
@@ -189,10 +190,10 @@ class PaymentController extends Controller
                 $logContext['tenant_code'] = $this->currentTenant->code;
             }
 
-            Log::channel('payment')->info('Initiating payment with gateway', $logContext);
+            Log::channel('payment')->info('Initiating payment with gateway manager', $logContext);
 
-            // Initialize payment with gateway
-            $paymentResponse = $this->paymentGateway->initializePayment($paymentRequest);
+            // Initialize payment with gateway manager
+            $paymentResponse = $this->gatewayManager->processPayment($paymentRequest);
 
             // Check if payment initiation was successful
             if (!$paymentResponse->success) {

@@ -3,27 +3,48 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "build": "vite build",
-        "dev": "vite"
+        "build": "vue-tsc && vite build",
+        "dev": "vite",
+        "type-check": "vue-tsc --noEmit",
+        "lint": "eslint resources/js --ext .ts,.vue --fix",
+        "test": "vitest --run",
+        "test:watch": "vitest",
+        "test:ui": "vitest --ui"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",
+        "@types/node": "^25.0.5",
+        "@typescript-eslint/eslint-plugin": "^8.52.0",
+        "@typescript-eslint/parser": "^8.52.0",
         "@vitejs/plugin-vue": "^6.0.3",
+        "@vitest/ui": "^4.0.16",
+        "@vue/test-utils": "^2.4.6",
         "axios": "^1.13.2",
         "concurrently": "^9.0.1",
+        "eslint": "^9.39.2",
+        "eslint-plugin-vue": "^10.6.2",
+        "fast-check": "^4.5.3",
+        "jsdom": "^27.4.0",
         "laravel-vite-plugin": "^2.0.0",
         "tailwindcss": "^4.0.0",
+        "typescript": "^5.9.3",
         "vite": "^7.0.7",
-        "vue-loader": "^17.4.2"
+        "vitest": "^4.0.16",
+        "vue-loader": "^17.4.2",
+        "vue-tsc": "^3.2.2"
     },
     "dependencies": {
         "@popperjs/core": "^2.11.8",
         "aos": "^2.3.4",
         "bootstrap": "^5.3.8",
+        "chart.js": "^4.5.1",
         "glightbox": "^3.3.1",
+        "laravel-echo": "^2.2.7",
         "pinia": "^3.0.4",
+        "pusher-js": "^8.4.0",
         "swiper": "^12.0.3",
         "vue": "^3.5.26",
         "vue-router": "^4.6.4"
-    }
+    },
+    "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

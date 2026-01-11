@@ -7,6 +7,11 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // Only run PostgreSQL optimizations on PostgreSQL databases
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            return;
+        }
+        
         $this->enableExtensions();
         $this->convertJsonToJsonb();
         $this->optimizeTables();
@@ -108,6 +113,11 @@ return new class extends Migration
 
     public function down(): void
     {
+        // Only run PostgreSQL optimizations rollback on PostgreSQL databases
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            return;
+        }
+        
         DB::statement('DROP INDEX IF EXISTS idx_payments_metadata_package');
         DB::statement('DROP INDEX IF EXISTS idx_vouchers_metadata_package');
         DB::statement('DROP INDEX IF EXISTS idx_customers_metadata_registration_source');
