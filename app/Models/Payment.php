@@ -26,7 +26,12 @@ class Payment extends BaseModel
         'failed_at',
         'refunded_at',
         'gateway_response',
-        'metadata'
+        'metadata',
+        'audit_trail',
+        'resolved_at',
+        'resolution_notes',
+        'disputed_at',
+        'dispute_reason'
     ];
 
     protected $casts = [
@@ -34,8 +39,11 @@ class Payment extends BaseModel
         'paid_at' => 'datetime',
         'failed_at' => 'datetime',
         'refunded_at' => 'datetime',
+        'resolved_at' => 'datetime',
+        'disputed_at' => 'datetime',
         'gateway_response' => 'array',
-        'metadata' => 'array'
+        'metadata' => 'array',
+        'audit_trail' => 'array'
     ];
 
     protected $appends = [

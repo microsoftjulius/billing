@@ -184,7 +184,7 @@ import Modal from '@/components/common/Modal.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import CustomerDetailView from './CustomerDetailView.vue'
 import CustomerForm from './CustomerForm.vue'
-import api from '@/api'
+import api from '@/api/index'
 import type { Customer, Payment, SmsLog, ApiResponse } from '@/types'
 
 // Stores
@@ -308,7 +308,7 @@ const customerFilters = [
 const loadCustomers = async () => {
   try {
     loading.value = true
-    const response = await api.get('/customers?include=service_plan,last_payment')
+    const response = await api.get('/api/v1/customers?include=service_plan,last_payment')
     customers.value = response.data.data
   } catch (error) {
     console.error('Failed to load customers:', error)
@@ -336,7 +336,7 @@ const viewCustomer = async (customer: Customer) => {
 const loadCustomerPaymentHistory = async (customerId: string) => {
   try {
     loadingPayments.value = true
-    const response = await api.get(`/customers/${customerId}/payments`)
+    const response = await api.get(`/api/v1/customers/${customerId}/payments`)
     customerPaymentHistory.value = response.data.data
   } catch (error) {
     console.error('Failed to load payment history:', error)
@@ -353,7 +353,7 @@ const loadCustomerPaymentHistory = async (customerId: string) => {
 const loadCustomerSmsHistory = async (customerId: string) => {
   try {
     loadingSms.value = true
-    const response = await api.get(`/customers/${customerId}/sms-logs`)
+    const response = await api.get(`/api/v1/customers/${customerId}/sms-history`)
     customerSmsHistory.value = response.data.data
   } catch (error) {
     console.error('Failed to load SMS history:', error)
@@ -381,7 +381,7 @@ const deleteCustomer = async () => {
   if (!customerToDelete.value) return
 
   try {
-    await api.delete(`/customers/${customerToDelete.value.id}`)
+    await api.delete(`/api/v1/customers/${customerToDelete.value.id}`)
     
     // Remove from local list
     const index = customers.value.findIndex(c => c.id === customerToDelete.value!.id)
@@ -414,7 +414,7 @@ const saveCustomer = async (customerData: Partial<Customer>) => {
     let response: ApiResponse<Customer>
     if (editingCustomer.value?.id) {
       // Update existing customer
-      response = await api.put(`/customers/${editingCustomer.value.id}`, customerData)
+      response = await api.put(`/api/v1/customers/${editingCustomer.value.id}`, customerData)
       
       // Update in local list
       const index = customers.value.findIndex(c => c.id === editingCustomer.value!.id)
@@ -423,7 +423,7 @@ const saveCustomer = async (customerData: Partial<Customer>) => {
       }
     } else {
       // Create new customer
-      response = await api.post('/customers', customerData)
+      response = await api.post('/api/v1/customers', customerData)
       customers.value.unshift(response.data)
     }
 
@@ -448,7 +448,7 @@ const saveCustomer = async (customerData: Partial<Customer>) => {
 
 const recordPayment = async (paymentData: any) => {
   try {
-    const response = await api.post('/payments', {
+    const response = await api.post('/api/v1/payments', {
       ...paymentData,
       customer_id: selectedCustomer.value?.id
     })
@@ -473,7 +473,7 @@ const recordPayment = async (paymentData: any) => {
 
 const suspendService = async (customerId: string) => {
   try {
-    await api.patch(`/customers/${customerId}/suspend`)
+    await api.patch(`/api/v1/customers/${customerId}/suspend`)
     
     // Update customer status
     if (selectedCustomer.value?.id === customerId) {
@@ -502,7 +502,7 @@ const suspendService = async (customerId: string) => {
 
 const activateService = async (customerId: string) => {
   try {
-    await api.patch(`/customers/${customerId}/activate`)
+    await api.patch(`/api/v1/customers/${customerId}/activate`)
     
     // Update customer status
     if (selectedCustomer.value?.id === customerId) {
@@ -531,7 +531,7 @@ const activateService = async (customerId: string) => {
 
 const sendSms = async (smsData: any) => {
   try {
-    const response = await api.post('/sms/send', {
+    const response = await api.post('/api/v1/sms/send', {
       ...smsData,
       customer_id: selectedCustomer.value?.id,
       phone_number: selectedCustomer.value?.phone
@@ -585,7 +585,7 @@ const handleSelectionChange = (selectedRows: Customer[]) => {
 const bulkSuspendCustomers = async (customers: Customer[]) => {
   try {
     const customerIds = customers.map(c => c.id)
-    await api.post('/customers/bulk-suspend', { customer_ids: customerIds })
+    await api.post('/api/v1/customers/bulk-suspend', { customer_ids: customerIds })
     
     // Update local state
     customers.forEach(customer => {
@@ -613,7 +613,7 @@ const bulkSuspendCustomers = async (customers: Customer[]) => {
 const bulkActivateCustomers = async (customers: Customer[]) => {
   try {
     const customerIds = customers.map(c => c.id)
-    await api.post('/customers/bulk-activate', { customer_ids: customerIds })
+    await api.post('/api/v1/customers/bulk-activate', { customer_ids: customerIds })
     
     // Update local state
     customers.forEach(customer => {
@@ -645,7 +645,7 @@ const bulkDeleteCustomers = async (customers: Customer[]) => {
 
   try {
     const customerIds = customers.map(c => c.id)
-    await api.post('/customers/bulk-delete', { customer_ids: customerIds })
+    await api.post('/api/v1/customers/bulk-delete', { customer_ids: customerIds })
     
     // Remove from local state
     customerIds.forEach(id => {
@@ -692,7 +692,7 @@ onMounted(async () => {
   
   // Load service plans for customer form
   try {
-    const response = await api.get('/service-plans')
+    const response = await api.get('/api/v1/service-plans')
     servicePlans.value = response.data.data
   } catch (error) {
     console.error('Failed to load service plans:', error)

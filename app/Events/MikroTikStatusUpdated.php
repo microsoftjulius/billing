@@ -14,7 +14,8 @@ class MikroTikStatusUpdated implements ShouldBroadcast
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
-        public MikroTikDevice $device
+        public MikroTikDevice $device,
+        public string $action = 'updated'
     ) {}
 
     /**
@@ -33,6 +34,7 @@ class MikroTikStatusUpdated implements ShouldBroadcast
     public function broadcastWith(): array
     {
         return [
+            'action' => $this->action,
             'device' => [
                 'id' => $this->device->id,
                 'name' => $this->device->name,
@@ -42,6 +44,8 @@ class MikroTikStatusUpdated implements ShouldBroadcast
                 'last_seen' => $this->device->last_seen?->toISOString(),
                 'uptime_seconds' => $this->device->uptime_seconds,
                 'updated_at' => $this->device->updated_at->toISOString(),
+                'active_users_count' => $this->device->active_users_count,
+                'total_users_count' => $this->device->total_users_count,
             ],
         ];
     }

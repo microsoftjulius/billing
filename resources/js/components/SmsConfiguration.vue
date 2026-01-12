@@ -205,7 +205,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import api from '@/api'
+import api from '@/api/index'
 
 // Reactive state
 const loading = ref(false)
@@ -281,7 +281,7 @@ const testResultClass = computed(() => {
 const loadConfiguration = async () => {
   try {
     loading.value = true
-    const response = await api.get('/sms/configuration')
+    const response = await api.get('/api/v1/sms/configuration')
     
     if (response.data.success) {
       configStatus.value = response.data.data
@@ -344,7 +344,7 @@ const saveConfiguration = async () => {
   try {
     loading.value = true
     
-    const response = await api.put('/sms/configuration', form.value)
+    const response = await api.put('/api/v1/sms/configuration', form.value)
     
     if (response.data.success) {
       // Reload configuration to get updated status
@@ -368,7 +368,7 @@ const testConfiguration = async () => {
   try {
     testing.value = true
     
-    const response = await api.post('/sms/test-configuration')
+    const response = await api.post('/api/v1/sms/test-configuration')
     
     if (response.data.success) {
       alert('SMS configuration test successful!')

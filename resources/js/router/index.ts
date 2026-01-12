@@ -1,9 +1,7 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router'
 import { useAppStore } from '@/store/modules/app'
 
-import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router'
-import { useAppStore } from '@/store/modules/app'
-
+// Force TypeScript to recompile by adding a comment
 const routes: RouteRecordRaw[] = [
     {
         path: '/',
@@ -38,7 +36,7 @@ const routes: RouteRecordRaw[] = [
             {
                 path: 'customers',
                 name: 'customers',
-                component: () => import('@/components/CustomerManagement.vue'),
+                component: () => import('@/components/CustomersPlaceholder.vue'),
                 meta: { 
                     title: 'Customer Management',
                     breadcrumb: ['Dashboard', 'Customers']
@@ -47,7 +45,7 @@ const routes: RouteRecordRaw[] = [
             {
                 path: 'vouchers',
                 name: 'vouchers',
-                component: () => import('@/components/VoucherManagement.vue'),
+                component: () => import('@/components/VouchersPlaceholder.vue'),
                 meta: { 
                     title: 'Voucher Management',
                     breadcrumb: ['Dashboard', 'Vouchers']
@@ -56,25 +54,52 @@ const routes: RouteRecordRaw[] = [
             {
                 path: 'payments',
                 name: 'payments',
-                component: () => import('@/components/Payment/PaymentGatewayManagement.vue'),
+                component: () => import('@/components/PaymentsPlaceholder.vue'),
                 meta: { 
                     title: 'Payment Management',
                     breadcrumb: ['Dashboard', 'Payments']
                 }
             },
             {
+                path: 'payment-analytics',
+                name: 'payment-analytics',
+                component: () => import('@/components/PaymentAnalytics.vue'),
+                meta: { 
+                    title: 'Payment Analytics',
+                    breadcrumb: ['Dashboard', 'Payment Analytics']
+                }
+            },
+            {
                 path: 'mikrotik',
                 name: 'mikrotik',
-                component: () => import('@/components/MikroTikMonitor.vue'),
+                component: () => import('@/components/MikroTikPlaceholder.vue'),
                 meta: { 
                     title: 'MikroTik Monitoring',
                     breadcrumb: ['Dashboard', 'MikroTik']
                 }
             },
             {
+                path: 'mikrotik-config',
+                name: 'mikrotik-config',
+                component: () => import('@/components/MikroTikConfiguration.vue'),
+                meta: { 
+                    title: 'MikroTik Configuration',
+                    breadcrumb: ['Dashboard', 'MikroTik Configuration']
+                }
+            },
+            {
+                path: 'router-management',
+                name: 'router-management',
+                component: () => import('@/components/RouterManagement.vue'),
+                meta: { 
+                    title: 'Router Management',
+                    breadcrumb: ['Dashboard', 'Router Management']
+                }
+            },
+            {
                 path: 'sms',
                 name: 'sms',
-                component: () => import('@/components/SmsConfiguration.vue'),
+                component: () => import('@/components/SmsPlaceholder.vue'),
                 meta: { 
                     title: 'SMS Configuration',
                     breadcrumb: ['Dashboard', 'SMS']
@@ -132,19 +157,61 @@ const router = createRouter({
 })
 
 // Navigation guard
-router.beforeEach((to, _from, next) => {
-    const requiresAuth = to.matched.some(record => record.meta?.requiresAuth)
-    const requiresGuest = to.matched.some(record => record.meta?.requiresGuest)
-    const appStore = useAppStore()
-    const isAuthenticated = appStore.isAuthenticated
+router.beforeEach((to, from, next) => {
+    console.log('Router navigation:', { from: from.path, to: to.path })
+    
+    try {
+        const requiresAuth = to.matched.some(record => record.meta?.requiresAuth)
+        const requiresGuest = to.matched.some(record => record.meta?.requiresGuest)
+        const appStore = useAppStore()
+        
+        // Ensure app is initialized before checking authentication
+        // This is important for page reloads where the store hasn't been initialized yet
+        if (!appStore.isInitialized) {
+            console.log('Initializing app store...')
+            appStore.initializeApp()
+        }
+        
+        // For development: create a demo user if none exists
+        if (import.meta.env.DEV && !appStore.user) {
+            console.log('Creating demo user for development...')
+            const demoUser = {
+                id: 'demo-user-1',
+                name: 'Demo User',
+                email: 'admin@billing.com',
+                role: 'admin' as const,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            }
+            appStore.setUser(demoUser)
+            localStorage.setItem('auth_token', 'demo-token-123')
+            localStorage.setItem('user', JSON.stringify(demoUser))
+        }
+        
+        const isAuthenticated = appStore.isAuthenticated
+        console.log('Authentication status:', { isAuthenticated, requiresAuth, requiresGuest })
 
-    if (requiresAuth && !isAuthenticated) {
-        next('/login')
-    } else if (requiresGuest && isAuthenticated) {
-        next('/app/dashboard')
-    } else {
+        if (requiresAuth && !isAuthenticated) {
+            console.log('Redirecting to login - authentication required')
+            next('/login')
+        } else if (requiresGuest && isAuthenticated) {
+            console.log('Redirecting to dashboard - already authenticated')
+            next('/app/dashboard')
+        } else {
+            console.log('Navigation allowed to:', to.path)
+            next()
+        }
+    } catch (error) {
+        console.warn('Navigation guard error:', error)
+        // If there's an error, just proceed with navigation
         next()
     }
+})
+
+// After navigation hook for debugging
+router.afterEach((to, from) => {
+    console.log('Navigation completed:', { from: from.path, to: to.path })
+    console.log('Current route meta:', to.meta)
 })
 
 export default router

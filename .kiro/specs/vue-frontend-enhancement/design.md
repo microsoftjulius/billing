@@ -80,6 +80,9 @@ graph TD
         VOUCHERS[VoucherManagement.vue]
         PAYMENTS[PaymentManagement.vue]
         MIKROTIK_MONITOR[MikroTikMonitor.vue]
+        MIKROTIK_CONFIG[MikroTikConfiguration.vue]
+        ROUTER_MANAGER[RouterManagement.vue]
+        PAYMENT_ANALYTICS[PaymentAnalytics.vue]
         SMS_MANAGER[SmsManager.vue]
         SETTINGS[Settings.vue]
     end
@@ -100,6 +103,9 @@ graph TD
     APP --> VOUCHERS
     APP --> PAYMENTS
     APP --> MIKROTIK_MONITOR
+    APP --> MIKROTIK_CONFIG
+    APP --> ROUTER_MANAGER
+    APP --> PAYMENT_ANALYTICS
     APP --> SMS_MANAGER
     APP --> SETTINGS
     
@@ -171,6 +177,25 @@ graph TD
 - Connection statistics
 - Alert management
 
+**MikroTikConfiguration.vue**
+- Device configuration interface
+- User management for routers
+- Interface configuration
+- Backup and restore functionality
+
+**RouterManagement.vue**
+- Router addition with modal interface
+- Device credential management
+- Connection testing and validation
+- Router editing and deletion
+
+**PaymentAnalytics.vue**
+- Comprehensive payment reporting
+- Revenue trend analysis
+- Gateway performance metrics
+- Payment testing interface
+- Transaction editing capabilities
+
 #### 4. Shared Components
 
 **DataTable.vue**
@@ -180,6 +205,12 @@ graph TD
 - Export functionality (CSV, PDF)
 - Real-time data updates
 - Responsive design for mobile devices
+
+**Modal.vue**
+- Reusable modal component for forms
+- Router addition and configuration
+- Payment editing interface
+- Confirmation dialogs
 
 **ThemeToggle.vue**
 - System theme detection
@@ -242,6 +273,16 @@ class PaymentProcessed implements ShouldBroadcast
 - Transaction status tracking
 - Webhook handling for payment confirmations
 - Refund processing
+- Payment analytics and reporting
+- Payment testing functionality
+- Transaction editing with audit trails
+
+**MikroTikController**
+- Device management and configuration
+- Real-time status monitoring
+- API integration with RouterOS
+- Device credential management
+- Configuration backup and restore
 
 ## Data Models
 
@@ -303,7 +344,7 @@ CREATE TABLE payments (
     INDEX idx_payments_gateway (gateway_id)
 );
 
--- MikroTik Device Management
+-- Enhanced MikroTik Device Management
 CREATE TABLE mikrotik_devices (
     id UUID PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -315,10 +356,40 @@ CREATE TABLE mikrotik_devices (
     status ENUM('online', 'offline', 'error') DEFAULT 'offline',
     last_seen TIMESTAMP NULL,
     uptime_seconds BIGINT DEFAULT 0,
+    configuration JSONB NULL,
+    backup_data JSONB NULL,
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
     INDEX idx_mikrotik_status (status),
     INDEX idx_mikrotik_location ((location->>'region'))
+);
+
+-- MikroTik Configuration History
+CREATE TABLE mikrotik_config_history (
+    id UUID PRIMARY KEY,
+    device_id UUID NOT NULL,
+    configuration_data JSONB NOT NULL,
+    change_type ENUM('backup', 'restore', 'update') NOT NULL,
+    changed_by UUID NOT NULL,
+    created_at TIMESTAMP,
+    FOREIGN KEY (device_id) REFERENCES mikrotik_devices(id),
+    FOREIGN KEY (changed_by) REFERENCES users(id)
+);
+
+-- MikroTik Users (for voucher integration)
+CREATE TABLE mikrotik_users (
+    id UUID PRIMARY KEY,
+    device_id UUID NOT NULL,
+    username VARCHAR(100) NOT NULL,
+    password VARCHAR(100) NOT NULL,
+    profile VARCHAR(100) NOT NULL,
+    voucher_id UUID NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    FOREIGN KEY (device_id) REFERENCES mikrotik_devices(id),
+    FOREIGN KEY (voucher_id) REFERENCES vouchers(id),
+    UNIQUE KEY unique_device_username (device_id, username)
 );
 
 -- Payment Gateway Configuration
@@ -389,6 +460,42 @@ class MikroTikStatusDTO
     ) {}
 }
 
+// MikroTik Configuration DTO
+class MikroTikConfigDTO
+{
+    public function __construct(
+        public readonly string $deviceId,
+        public readonly array $configuration,
+        public readonly string $changeType,
+        public readonly string $changedBy
+    ) {}
+}
+
+// Router Management DTO
+class RouterManagementDTO
+{
+    public function __construct(
+        public readonly string $name,
+        public readonly string $ipAddress,
+        public readonly int $apiPort,
+        public readonly string $username,
+        public readonly string $password,
+        public readonly array $location,
+        public readonly ?array $configuration = null
+    ) {}
+}
+
+// Payment Analytics DTO
+class PaymentAnalyticsDTO
+{
+    public function __construct(
+        public readonly array $revenueData,
+        public readonly array $gatewayPerformance,
+        public readonly array $successRates,
+        public readonly array $transactionTrends
+    ) {}
+}
+
 // SMS Message DTO
 class SmsMessageDTO
 {
@@ -398,6 +505,88 @@ class SmsMessageDTO
         public readonly ?string $customerId = null,
         public readonly ?string $senderId = null
     ) {}
+}
+```
+
+#### 3. Laravel Observer Pattern
+
+```php
+// MikroTik Device Observer
+class MikroTikDeviceObserver
+{
+    public function updated(MikroTikDevice $device): void
+    {
+        // Broadcast status changes in real-time
+        if ($device->wasChanged('status')) {
+            broadcast(new MikroTikStatusUpdated($device));
+            
+            // Log status change
+            SystemLog::create([
+                'type' => 'mikrotik_status_change',
+                'data' => [
+                    'device_id' => $device->id,
+                    'old_status' => $device->getOriginal('status'),
+                    'new_status' => $device->status,
+                    'timestamp' => now()
+                ]
+            ]);
+        }
+        
+        // Handle configuration changes
+        if ($device->wasChanged('configuration')) {
+            MikroTikConfigHistory::create([
+                'device_id' => $device->id,
+                'configuration_data' => $device->configuration,
+                'change_type' => 'update',
+                'changed_by' => auth()->id()
+            ]);
+        }
+    }
+    
+    public function created(MikroTikDevice $device): void
+    {
+        // Initialize device monitoring
+        dispatch(new InitializeMikroTikMonitoring($device));
+        
+        // Broadcast new device addition
+        broadcast(new MikroTikDeviceAdded($device));
+    }
+}
+
+// Payment Observer
+class PaymentObserver
+{
+    public function updated(Payment $payment): void
+    {
+        if ($payment->wasChanged('status')) {
+            // Handle voucher activation on successful payment
+            if ($payment->status === 'completed' && $payment->voucher_id) {
+                dispatch(new ActivateVoucher($payment->voucher_id));
+            }
+            
+            // Broadcast payment status change
+            broadcast(new PaymentStatusUpdated($payment));
+        }
+    }
+}
+
+// Voucher Observer
+class VoucherObserver
+{
+    public function updated(Voucher $voucher): void
+    {
+        if ($voucher->wasChanged('status')) {
+            // Handle MikroTik user management
+            if ($voucher->status === 'active') {
+                dispatch(new CreateMikroTikUser($voucher));
+            } elseif ($voucher->status === 'expired') {
+                dispatch(new DisableMikroTikUser($voucher));
+            }
+            
+            // Broadcast voucher status change
+            broadcast(new VoucherStatusUpdated($voucher));
+        }
+    }
 }
 ```
 
@@ -596,6 +785,158 @@ Based on the prework analysis, the following properties validate the system's co
 ### Property 35: Loading Indicator Display
 *For any* asynchronous operation in the system, appropriate loading indicators should be displayed during the operation and hidden upon completion.
 **Validates: Requirements 13.5**
+
+### Property 36: Router Connection Validation
+*For any* router configuration being saved, the system should validate connection details and reject invalid configurations with appropriate error messages.
+**Validates: Requirements 14.2**
+
+### Property 37: Router Credential Encryption
+*For any* router credentials stored in the system, they should be encrypted in the database and never stored in plain text.
+**Validates: Requirements 14.3**
+
+### Property 38: Router Connectivity Testing
+*For any* router being added to the system, connectivity testing should be performed and the results should be reported to the user.
+**Validates: Requirements 14.4**
+
+### Property 39: Router CRUD Operations
+*For any* router in the system, editing and deletion operations should work correctly and update the database appropriately.
+**Validates: Requirements 14.5**
+
+### Property 40: Router Management Interface Display
+*For any* router in the management interface, all required status and configuration information should be displayed correctly.
+**Validates: Requirements 14.6**
+
+### Property 41: Real-time Router Statistics Display
+*For any* router being monitored, real-time statistics should be retrieved and displayed in the monitoring interface.
+**Validates: Requirements 15.1**
+
+### Property 42: Router Monitoring Data Completeness
+*For any* router monitoring display, active connections, bandwidth usage, and system resources should all be included in the data.
+**Validates: Requirements 15.2**
+
+### Property 43: Router Configuration Modifications
+*For any* router configuration change, the modifications should be applied correctly and reflected in the device settings.
+**Validates: Requirements 15.3**
+
+### Property 44: Router Interface and User Management
+*For any* router configuration interface, interface configuration and user management capabilities should be available and functional.
+**Validates: Requirements 15.4**
+
+### Property 45: Router Log Display
+*For any* router in the system, logs and system information should be retrievable and displayed correctly.
+**Validates: Requirements 15.5**
+
+### Property 46: Router Configuration Backup and Restore
+*For any* router configuration, backing up and then restoring should preserve the original configuration state.
+**Validates: Requirements 15.6**
+
+### Property 47: MikroTik Database Storage
+*For any* MikroTik device configuration, it should be stored in the database and retrievable with all configuration details intact.
+**Validates: Requirements 16.1**
+
+### Property 48: Laravel Observer Triggering
+*For any* MikroTik device data change, Laravel observers should be triggered and execute the appropriate update logic.
+**Validates: Requirements 16.2**
+
+### Property 49: Configuration Change Audit Logging
+*For any* MikroTik device configuration change, an audit log entry should be created with the change details and timestamp.
+**Validates: Requirements 16.3**
+
+### Property 50: Device Status Synchronization
+*For any* MikroTik device status change, the change should be automatically synchronized to the database.
+**Validates: Requirements 16.4**
+
+### Property 51: Real-time Device Change Broadcasting
+*For any* MikroTik device change, the change should be broadcast to all connected clients in real-time.
+**Validates: Requirements 16.5**
+
+### Property 52: Device Connection Failure Handling
+*For any* MikroTik device connection failure, the system should handle it gracefully and log appropriate error information.
+**Validates: Requirements 16.6**
+
+### Property 53: Payment Analytics Generation
+*For any* payment data in the system, detailed analytics with charts and reports should be generated correctly.
+**Validates: Requirements 17.1**
+
+### Property 54: Payment Analytics Data Completeness
+*For any* payment analytics view, success rates, revenue trends, and gateway performance metrics should all be included.
+**Validates: Requirements 17.2**
+
+### Property 55: Payment Gateway Connectivity Testing
+*For any* payment gateway configuration, connectivity testing should verify the gateway connection and report results.
+**Validates: Requirements 17.3**
+
+### Property 56: Payment Gateway Test Transactions
+*For any* payment gateway being tested, test transactions should be performed and results should be reported accurately.
+**Validates: Requirements 17.4**
+
+### Property 57: Payment Record Editing
+*For any* payment record in the system, editing should be allowed for corrections and adjustments with proper validation.
+**Validates: Requirements 17.5**
+
+### Property 58: Payment Modification Audit Trails
+*For any* payment record modification, an audit trail should be created documenting the change and who made it.
+**Validates: Requirements 17.6**
+
+### Property 59: Payment Reconciliation Tools
+*For any* payment data, reconciliation tools should work correctly and provide accurate dispute management capabilities.
+**Validates: Requirements 17.7**
+
+### Property 60: MikroTik API Integration
+*For any* MikroTik device, API communication should work correctly for device management and monitoring operations.
+**Validates: Requirements 18.1**
+
+### Property 61: MikroTik API Authentication
+*For any* MikroTik device connection, secure API authentication should be used and credentials should be protected.
+**Validates: Requirements 18.2**
+
+### Property 62: Real-time API Monitoring
+*For any* MikroTik device, real-time monitoring through API calls should provide accurate and current device information.
+**Validates: Requirements 18.3**
+
+### Property 63: API Configuration Changes
+*For any* MikroTik device configuration change through API, the changes should be applied correctly and reflected on the device.
+**Validates: Requirements 18.4**
+
+### Property 64: API Error Handling
+*For any* MikroTik API connection error or timeout, the system should handle it gracefully and provide appropriate error messages.
+**Validates: Requirements 18.5**
+
+### Property 65: API Response Caching
+*For any* MikroTik API response, appropriate caching should be implemented for performance optimization without compromising data accuracy.
+**Validates: Requirements 18.6**
+
+### Property 66: API Rate Limiting and Connection Pooling
+*For any* MikroTik API usage, rate limiting and connection pooling should be implemented to manage performance and resource usage.
+**Validates: Requirements 18.7**
+
+### Property 67: Advanced Voucher Generation
+*For any* set of voucher generation parameters, the system should generate vouchers correctly with the specified customizable parameters.
+**Validates: Requirements 19.1**
+
+### Property 68: Voucher Batch Operations with Progress Tracking
+*For any* voucher batch operation, progress tracking should accurately reflect the completion status and remaining items.
+**Validates: Requirements 19.2**
+
+### Property 69: Voucher-MikroTik Integration
+*For any* voucher activation, the system should create corresponding MikroTik users and manage the integration correctly.
+**Validates: Requirements 19.3**
+
+### Property 70: Voucher Usage Analytics
+*For any* voucher usage data, analytics should provide accurate insights into customer behavior and usage patterns.
+**Validates: Requirements 19.4**
+
+### Property 71: Voucher Transfer Functionality
+*For any* voucher transfer between customers, the transfer should be processed correctly and update all relevant records.
+**Validates: Requirements 19.5**
+
+### Property 72: Voucher Expiration Management
+*For any* voucher with expiration policies, the system should apply expiration rules correctly and perform automatic cleanup.
+**Validates: Requirements 19.6**
+
+### Property 73: Voucher Refund and Cancellation
+*For any* voucher refund or cancellation request, the system should process it correctly and update all related records appropriately.
+**Validates: Requirements 19.7**
 
 ## Error Handling
 
@@ -848,6 +1189,153 @@ class MikroTikService
                 lastSeen: $device->last_seen,
                 statistics: []
             );
+        }
+    }
+    
+    public function addRouter(RouterManagementDTO $routerData): MikroTikDevice
+    {
+        try {
+            // Test connectivity before saving
+            $this->testRouterConnectivity($routerData);
+            
+            $device = MikroTikDevice::create([
+                'name' => $routerData->name,
+                'ip_address' => $routerData->ipAddress,
+                'api_port' => $routerData->apiPort,
+                'username' => $routerData->username,
+                'password_encrypted' => encrypt($routerData->password),
+                'location' => $routerData->location,
+                'configuration' => $routerData->configuration
+            ]);
+            
+            // Initialize monitoring
+            dispatch(new InitializeMikroTikMonitoring($device));
+            
+            return $device;
+            
+        } catch (RouterConnectionException $e) {
+            throw new RouterManagementException(
+                'Failed to connect to router: ' . $e->getMessage(),
+                'CONNECTION_FAILED'
+            );
+        } catch (Exception $e) {
+            Log::error('Router addition failed', [
+                'ip_address' => $routerData->ipAddress,
+                'error' => $e->getMessage()
+            ]);
+            
+            throw new RouterManagementException(
+                'Failed to add router to system',
+                'SYSTEM_ERROR'
+            );
+        }
+    }
+    
+    public function configureRouter(string $deviceId, array $configuration): bool
+    {
+        $device = MikroTikDevice::findOrFail($deviceId);
+        
+        try {
+            $api = new RouterOSAPI();
+            $api->connect($device->ip_address, $device->username, decrypt($device->password_encrypted));
+            
+            // Apply configuration changes
+            foreach ($configuration as $command => $params) {
+                $api->comm($command, $params);
+            }
+            
+            $api->disconnect();
+            
+            // Update stored configuration
+            $device->update(['configuration' => $configuration]);
+            
+            return true;
+            
+        } catch (Exception $e) {
+            Log::error('Router configuration failed', [
+                'device_id' => $deviceId,
+                'error' => $e->getMessage()
+            ]);
+            
+            throw new RouterConfigurationException(
+                'Failed to apply router configuration',
+                'CONFIG_FAILED'
+            );
+        }
+    }
+}
+
+class PaymentAnalyticsService
+{
+    public function generateAnalytics(array $filters = []): PaymentAnalyticsDTO
+    {
+        try {
+            $query = Payment::query();
+            
+            // Apply filters
+            if (isset($filters['date_from'])) {
+                $query->where('created_at', '>=', $filters['date_from']);
+            }
+            if (isset($filters['date_to'])) {
+                $query->where('created_at', '<=', $filters['date_to']);
+            }
+            if (isset($filters['gateway_id'])) {
+                $query->where('gateway_id', $filters['gateway_id']);
+            }
+            
+            $payments = $query->get();
+            
+            return new PaymentAnalyticsDTO(
+                revenueData: $this->calculateRevenueData($payments),
+                gatewayPerformance: $this->calculateGatewayPerformance($payments),
+                successRates: $this->calculateSuccessRates($payments),
+                transactionTrends: $this->calculateTransactionTrends($payments)
+            );
+            
+        } catch (Exception $e) {
+            Log::error('Payment analytics generation failed', [
+                'filters' => $filters,
+                'error' => $e->getMessage()
+            ]);
+            
+            throw new PaymentAnalyticsException(
+                'Failed to generate payment analytics',
+                'ANALYTICS_FAILED'
+            );
+        }
+    }
+    
+    public function testPaymentGateway(string $gatewayId): array
+    {
+        $gateway = PaymentGateway::findOrFail($gatewayId);
+        
+        try {
+            $testAmount = 100; // Test with 1 UGX
+            
+            $response = $gateway->processTestPayment([
+                'amount' => $testAmount,
+                'currency' => 'UGX',
+                'test_mode' => true
+            ]);
+            
+            return [
+                'status' => 'success',
+                'response_time' => $response['response_time'],
+                'gateway_status' => $response['status'],
+                'message' => 'Gateway connectivity test successful'
+            ];
+            
+        } catch (Exception $e) {
+            Log::warning('Payment gateway test failed', [
+                'gateway_id' => $gatewayId,
+                'error' => $e->getMessage()
+            ]);
+            
+            return [
+                'status' => 'failed',
+                'error' => $e->getMessage(),
+                'message' => 'Gateway connectivity test failed'
+            ];
         }
     }
 }

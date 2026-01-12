@@ -179,3 +179,84 @@ This specification defines the requirements for enhancing the existing Laravel b
 3. THE System SHALL implement lazy loading for large datasets
 4. THE System SHALL cache frequently accessed data locally
 5. THE System SHALL provide loading indicators for all async operations
+
+### Requirement 14: MikroTik Router Management
+
+**User Story:** As a network administrator, I want to add and manage MikroTik routers through a modal interface, so that I can configure network devices efficiently.
+
+#### Acceptance Criteria
+
+1. WHEN clicking "Add Router", THE System SHALL display a modal form for router configuration
+2. THE System SHALL validate router connection details before saving
+3. WHEN saving router configuration, THE System SHALL store encrypted credentials in the database
+4. THE System SHALL test router connectivity during the add process
+5. THE System SHALL provide router editing and deletion capabilities
+6. THE System SHALL display router status and configuration in a management interface
+
+### Requirement 15: MikroTik Monitor and Configure Functionality
+
+**User Story:** As a network administrator, I want functional monitor and configure capabilities for MikroTik devices, so that I can manage network operations effectively.
+
+#### Acceptance Criteria
+
+1. WHEN accessing monitor functionality, THE System SHALL display real-time router statistics
+2. THE System SHALL show active connections, bandwidth usage, and system resources
+3. WHEN accessing configure functionality, THE System SHALL allow router setting modifications
+4. THE System SHALL provide interface configuration and user management
+5. THE System SHALL display router logs and system information
+6. THE System SHALL allow backup and restore of router configurations
+
+### Requirement 16: MikroTik Database Integration with Laravel Observers
+
+**User Story:** As a system administrator, I want MikroTik data stored in the database with automatic updates, so that I can track device changes and maintain data consistency.
+
+#### Acceptance Criteria
+
+1. THE System SHALL store all MikroTik device configurations in the database
+2. WHEN MikroTik device data changes, THE System SHALL use Laravel observers to trigger updates
+3. THE System SHALL maintain audit logs of all device configuration changes
+4. THE System SHALL sync device status changes to the database automatically
+5. THE System SHALL broadcast device changes to connected clients in real-time
+6. THE System SHALL handle device connection failures gracefully with proper logging
+
+### Requirement 17: Payment Analytics, Testing, and Editing
+
+**User Story:** As a billing administrator, I want comprehensive payment analytics, testing capabilities, and editing functions, so that I can manage payment operations effectively.
+
+#### Acceptance Criteria
+
+1. THE System SHALL provide detailed payment analytics with charts and reports
+2. WHEN viewing payment analytics, THE System SHALL show success rates, revenue trends, and gateway performance
+3. THE System SHALL provide payment gateway testing functionality to verify connectivity
+4. WHEN testing payment gateways, THE System SHALL perform test transactions and report results
+5. THE System SHALL allow editing of payment records for corrections and adjustments
+6. THE System SHALL maintain audit trails for all payment modifications
+7. THE System SHALL provide payment reconciliation tools and dispute management
+
+### Requirement 18: Direct MikroTik API Integration
+
+**User Story:** As a network administrator, I want direct integration with MikroTik API, so that I can manage routers programmatically and automate network operations.
+
+#### Acceptance Criteria
+
+1. THE System SHALL integrate with MikroTik RouterOS API for device communication
+2. WHEN connecting to MikroTik devices, THE System SHALL use secure API authentication
+3. THE System SHALL provide real-time device monitoring through API calls
+4. THE System SHALL allow configuration changes through the API interface
+5. THE System SHALL handle API connection errors and timeouts gracefully
+6. THE System SHALL cache API responses for performance optimization
+7. THE System SHALL provide API rate limiting and connection pooling
+
+### Requirement 19: Enhanced Voucher Management System
+
+**User Story:** As a billing administrator, I want comprehensive voucher management capabilities, so that I can handle all aspects of voucher lifecycle and customer service.
+
+#### Acceptance Criteria
+
+1. THE System SHALL provide advanced voucher generation with customizable parameters
+2. WHEN generating vouchers, THE System SHALL support batch operations with progress tracking
+3. THE System SHALL integrate voucher activation with MikroTik user management
+4. THE System SHALL provide voucher usage analytics and customer behavior insights
+5. THE System SHALL handle voucher transfers between customers
+6. THE System SHALL support voucher expiration policies and automatic cleanup
+7. THE System SHALL provide voucher refund and cancellation capabilities

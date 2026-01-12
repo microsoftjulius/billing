@@ -450,10 +450,10 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useNotificationStore } from '@/store/modules/notifications'
+import { useAppStore } from '@/store/modules/app'
 import Modal from '@/components/common/Modal.vue'
 import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
-import api from '@/api'
+import api from '@/api/index'
 
 interface PaymentGateway {
   id: string
@@ -500,7 +500,7 @@ interface GatewayForm {
   configuration: Record<string, any>
 }
 
-const notificationStore = useNotificationStore()
+const appStore = useAppStore()
 
 // State
 const gateways = ref<PaymentGateway[]>([])
@@ -538,10 +538,10 @@ const canTestConnection = computed(() => {
 const loadGateways = async () => {
   loading.value = true
   try {
-    const response = await api.get('/payment-gateways')
+    const response = await api.get('/api/v1/payment-gateways')
     gateways.value = response.data.data
   } catch (error) {
-    notificationStore.addError('Failed to load payment gateways')
+    appStore.addErrorNotification('Failed to load payment gateways')
     console.error('Error loading gateways:', error)
   } finally {
     loading.value = false
@@ -581,7 +581,7 @@ const testConnection = async () => {
 
   loading.value = true
   try {
-    const response = await api.post('/payment-gateways/test', {
+    const response = await api.post('/api/v1/payment-gateways/test', {
       provider: gatewayForm.value.provider,
       configuration: gatewayForm.value.configuration
     })
@@ -594,9 +594,9 @@ const testConnection = async () => {
     showTestResults.value = true
 
     if (response.data.success) {
-      notificationStore.addSuccess('Gateway connection test successful')
+      appStore.addSuccessNotification('Gateway connection test successful')
     } else {
-      notificationStore.addError('Gateway connection test failed')
+      appStore.addErrorNotification('Gateway connection test failed')
     }
   } catch (error: any) {
     testResults.value = {
@@ -605,7 +605,7 @@ const testConnection = async () => {
       details: error.response?.data
     }
     showTestResults.value = true
-    notificationStore.addError('Connection test failed')
+    appStore.addErrorNotification('Connection test failed')
   } finally {
     loading.value = false
   }
@@ -618,19 +618,19 @@ const saveGateway = async () => {
     
     let response
     if (editingGateway.value) {
-      response = await api.put(`/payment-gateways/${editingGateway.value.id}`, payload)
+      response = await api.put(`/api/v1/payment-gateways/${editingGateway.value.id}`, payload)
     } else {
-      response = await api.post('/payment-gateways', payload)
+      response = await api.post('/api/v1/payment-gateways', payload)
     }
 
-    notificationStore.addSuccess(
+    appStore.addSuccessNotification(
       editingGateway.value ? 'Gateway updated successfully' : 'Gateway created successfully'
     )
 
     closeModal()
     await loadGateways()
   } catch (error: any) {
-    notificationStore.addError(
+    appStore.addErrorNotification(
       error.response?.data?.message || 'Failed to save gateway'
     )
   } finally {
@@ -683,9 +683,9 @@ const refreshAnalytics = async () => {
   try {
     await loadGateways()
     await loadAnalyticsOverview()
-    notificationStore.addSuccess('Analytics refreshed successfully')
+    appStore.addSuccessNotification('Analytics refreshed successfully')
   } catch (error) {
-    notificationStore.addError('Failed to refresh analytics')
+    appStore.addErrorNotification('Failed to refresh analytics')
   } finally {
     loading.value = false
   }
@@ -866,9 +866,9 @@ const exportAnalytics = async (gateway: PaymentGateway) => {
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
     
-    notificationStore.addSuccess('Analytics report exported successfully')
+    appStore.addSuccessNotification('Analytics report exported successfully')
   } catch (error) {
-    notificationStore.addError('Failed to export analytics report')
+    appStore.addErrorNotification('Failed to export analytics report')
   }
 }
 
@@ -876,16 +876,16 @@ const exportAnalytics = async (gateway: PaymentGateway) => {
 const toggleGateway = async (gateway: PaymentGateway) => {
   toggling.value = gateway.id
   try {
-    await api.patch(`/payment-gateways/${gateway.id}/toggle`)
+    await api.patch(`/api/v1/payment-gateways/${gateway.id}/toggle`)
     gateway.is_active = !gateway.is_active
-    notificationStore.addSuccess(
+    appStore.addSuccessNotification(
       `Gateway ${gateway.is_active ? 'enabled' : 'disabled'} successfully`
     )
     
     // Refresh analytics after status change
     await loadAnalyticsOverview()
   } catch (error: any) {
-    notificationStore.addError(
+    appStore.addErrorNotification(
       error.response?.data?.message || 'Failed to toggle gateway status'
     )
   } finally {
@@ -897,7 +897,7 @@ const toggleGateway = async (gateway: PaymentGateway) => {
 const testGateway = async (gateway: PaymentGateway) => {
   testing.value = gateway.id
   try {
-    const response = await api.post(`/payment-gateways/${gateway.id}/test`)
+    const response = await api.post(`/api/v1/payment-gateways/${gateway.id}/test`)
     
     // Store test result in gateway object
     gateway.last_test_result = {
@@ -914,9 +914,9 @@ const testGateway = async (gateway: PaymentGateway) => {
     showTestResults.value = true
 
     if (response.data.success) {
-      notificationStore.addSuccess('Gateway test successful')
+      appStore.addSuccessNotification('Gateway test successful')
     } else {
-      notificationStore.addError('Gateway test failed')
+      appStore.addErrorNotification('Gateway test failed')
     }
   } catch (error: any) {
     const result = {
@@ -928,7 +928,7 @@ const testGateway = async (gateway: PaymentGateway) => {
     gateway.last_test_result = result
     testResults.value = result
     showTestResults.value = true
-    notificationStore.addError('Gateway test failed')
+    appStore.addErrorNotification('Gateway test failed')
   } finally {
     testing.value = null
   }

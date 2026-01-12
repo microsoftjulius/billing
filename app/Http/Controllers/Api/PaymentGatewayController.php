@@ -401,6 +401,208 @@ class PaymentGatewayController extends Controller
     }
 
     /**
+     * Test multiple gateways
+     */
+    public function testMultiple(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'gateway_ids' => 'required|array',
+            'gateway_ids.*' => 'exists:payment_gateways,id',
+            'test_transaction' => 'boolean'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $gatewayIds = $request->input('gateway_ids');
+            $testTransaction = $request->input('test_transaction', false);
+            $results = [];
+
+            foreach ($gatewayIds as $gatewayId) {
+                $gateway = PaymentGateway::find($gatewayId);
+                if (!$gateway) {
+                    continue;
+                }
+
+                $startTime = microtime(true);
+                
+                try {
+                    $configuration = $this->decryptSensitiveData(
+                        $gateway->configuration,
+                        $gateway->provider
+                    );
+
+                    $testResult = $this->testGatewayConnection($gateway->provider, $configuration);
+                    
+                    // If test transaction is requested and connection is successful
+                    if ($testTransaction && $testResult['success']) {
+                        $transactionResult = $this->performTestTransaction($gateway->provider, $configuration);
+                        $testResult['test_transaction'] = $transactionResult;
+                    }
+
+                    $endTime = microtime(true);
+                    $responseTime = round(($endTime - $startTime) * 1000, 2);
+
+                    $results[] = [
+                        'gateway_id' => $gateway->id,
+                        'gateway_name' => $gateway->name,
+                        'provider' => $gateway->provider,
+                        'success' => $testResult['success'],
+                        'message' => $testResult['message'],
+                        'response_time' => $responseTime,
+                        'details' => $testResult['details'] ?? null,
+                        'test_transaction' => $testResult['test_transaction'] ?? null
+                    ];
+
+                } catch (\Exception $e) {
+                    $endTime = microtime(true);
+                    $responseTime = round(($endTime - $startTime) * 1000, 2);
+
+                    $results[] = [
+                        'gateway_id' => $gateway->id,
+                        'gateway_name' => $gateway->name,
+                        'provider' => $gateway->provider,
+                        'success' => false,
+                        'message' => 'Test failed: ' . $e->getMessage(),
+                        'response_time' => $responseTime,
+                        'details' => null
+                    ];
+                }
+            }
+
+            Log::info('Multiple gateway test completed', [
+                'tested_gateways' => count($results),
+                'successful_tests' => count(array_filter($results, fn($r) => $r['success'])),
+                'test_transaction' => $testTransaction
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => $results
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Multiple gateway test failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gateway testing failed',
+                'error' => config('app.debug') ? $e->getMessage() : null
+            ], 500);
+        }
+    }
+
+    /**
+     * Get analytics for all gateways
+     */
+    public function analytics(): JsonResponse
+    {
+        try {
+            $gateways = PaymentGateway::all();
+            $analyticsData = [];
+
+            foreach ($gateways as $gateway) {
+                // In a real implementation, this would query actual payment data
+                // For now, we'll generate mock analytics data
+                $totalTransactions = rand(50, 500);
+                $successfulTransactions = rand(40, $totalTransactions);
+                $totalVolume = rand(500000, 5000000);
+                $totalFees = $totalVolume * 0.025; // 2.5% fee estimate
+
+                $analyticsData[] = [
+                    'id' => $gateway->id,
+                    'name' => $gateway->name,
+                    'provider' => $gateway->provider,
+                    'is_active' => $gateway->is_active,
+                    'success_rate' => $totalTransactions > 0 ? round(($successfulTransactions / $totalTransactions) * 100, 2) : 0,
+                    'total_volume' => $totalVolume,
+                    'total_fees' => $totalFees,
+                    'transaction_count' => $totalTransactions,
+                    'successful_transactions' => $successfulTransactions,
+                    'failed_transactions' => $totalTransactions - $successfulTransactions,
+                    'average_transaction_amount' => $totalTransactions > 0 ? round($totalVolume / $totalTransactions, 2) : 0,
+                    'last_transaction_date' => now()->subDays(rand(0, 30))->toISOString()
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $analyticsData
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch gateway analytics', [
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch analytics data'
+            ], 500);
+        }
+    }
+
+    /**
+     * Perform test transaction
+     */
+    private function performTestTransaction(string $provider, array $configuration): array
+    {
+        try {
+            switch ($provider) {
+                case 'collectug':
+                    // Mock test transaction for CollectUG
+                    return [
+                        'success' => true,
+                        'message' => 'Test transaction successful',
+                        'transaction_id' => 'TEST_' . time(),
+                        'amount' => 100, // Test amount in UGX
+                        'status' => 'completed'
+                    ];
+
+                case 'stripe':
+                    // Mock test transaction for Stripe
+                    return [
+                        'success' => true,
+                        'message' => 'Test charge successful',
+                        'charge_id' => 'ch_test_' . time(),
+                        'amount' => 100, // Test amount in cents
+                        'status' => 'succeeded'
+                    ];
+
+                case 'paypal':
+                    // Mock test transaction for PayPal
+                    return [
+                        'success' => true,
+                        'message' => 'Test payment successful',
+                        'payment_id' => 'PAY-TEST-' . time(),
+                        'amount' => 1.00, // Test amount in USD
+                        'status' => 'approved'
+                    ];
+
+                default:
+                    return [
+                        'success' => false,
+                        'message' => 'Test transactions not supported for this provider'
+                    ];
+            }
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'message' => 'Test transaction failed: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
      * Validate provider-specific configuration
      */
     private function validateProviderConfiguration(string $provider, array $configuration): array

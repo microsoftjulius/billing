@@ -1,15 +1,13 @@
 <template>
     <div id="app" :data-theme="currentTheme">
-        <ErrorBoundary>
-            <router-view />
-            <NotificationCenter />
-            <LoadingOverlay :active="isLoading" />
-            
-            <!-- Connection Status Indicator -->
-            <div class="connection-status-container">
-                <ConnectionStatus />
-            </div>
-        </ErrorBoundary>
+        <router-view />
+        <NotificationCenter />
+        <LoadingOverlay :active="isLoading" />
+        
+        <!-- Connection Status Indicator -->
+        <div class="connection-status-container">
+            <ConnectionStatus />
+        </div>
     </div>
 </template>
 
@@ -22,22 +20,35 @@ import { setupGlobalErrorHandling } from '@/services/errorHandler'
 import NotificationCenter from '@/components/common/NotificationCenter.vue'
 import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
 import ConnectionStatus from '@/components/common/ConnectionStatus.vue'
-import ErrorBoundary from '@/components/common/ErrorBoundary.vue'
 
 const appStore = useAppStore()
 const { currentTheme, isLoading } = storeToRefs(appStore)
 
 onMounted(() => {
-    // Initialize app
-    appStore.initializeApp()
-    
-    // Setup global error handling
-    setupGlobalErrorHandling()
-    
-    // Initialize WebSocket connection after app is ready
-    setTimeout(() => {
-        webSocketService.initialize()
-    }, 1000)
+    try {
+        // Initialize app
+        appStore.initializeApp()
+        
+        // Setup global error handling (but don't let it crash the app)
+        try {
+            setupGlobalErrorHandling()
+        } catch (error) {
+            console.warn('Global error handling setup failed:', error)
+        }
+        
+        // Initialize WebSocket connection after app is ready (with error handling)
+        setTimeout(() => {
+            try {
+                webSocketService.initialize()
+            } catch (error) {
+                console.warn('WebSocket initialization failed:', error)
+                // Don't let WebSocket errors crash the app
+            }
+        }, 1000)
+    } catch (error) {
+        console.error('App initialization error:', error)
+        // Don't let initialization errors crash the app - just log them
+    }
 })
 
 onUnmounted(() => {

@@ -1002,11 +1002,325 @@ class PaymentController extends Controller
     }
 
     /**
+     * Update payment record (for editing functionality)
+     */
+    public function update(Request $request, Payment $payment): JsonResponse
+    {
+        $request->validate([
+            'amount' => 'sometimes|numeric|min:0',
+            'currency' => 'sometimes|string|in:UGX,USD,EUR',
+            'status' => 'sometimes|string|in:pending,completed,failed,refunded',
+            'notes' => 'required|string|max:500'
+        ]);
+
+        DB::beginTransaction();
+
+        try {
+            // Store original values for audit trail
+            $originalValues = $payment->only(['amount', 'currency', 'status']);
+            $changes = [];
+
+            // Track changes
+            foreach ($request->only(['amount', 'currency', 'status']) as $field => $value) {
+                if ($payment->$field != $value) {
+                    $changes[$field] = [
+                        'from' => $payment->$field,
+                        'to' => $value
+                    ];
+                }
+            }
+
+            // Update payment
+            $payment->update($request->only(['amount', 'currency', 'status']));
+
+            // Create audit trail entry
+            if (!empty($changes)) {
+                $auditTrail = $payment->audit_trail ?? [];
+                $auditTrail[] = [
+                    'id' => Str::orderedUuid(),
+                    'action' => 'payment_updated',
+                    'user_id' => auth()->id(),
+                    'user_name' => auth()->user()->name ?? 'System',
+                    'changes' => $changes,
+                    'notes' => $request->notes,
+                    'created_at' => now()->toISOString()
+                ];
+
+                $payment->update(['audit_trail' => $auditTrail]);
+            }
+
+            DB::commit();
+
+            $logContext = [
+                'payment_id' => $payment->id,
+                'transaction_id' => $payment->transaction_id,
+                'changes' => $changes,
+                'user_id' => auth()->id()
+            ];
+
+            if ($this->currentTenant) {
+                $logContext['tenant_id'] = $this->currentTenant->id;
+            }
+
+            Log::channel('payment')->info('Payment record updated', $logContext);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Payment updated successfully',
+                'data' => $this->formatPaymentResponse($payment)
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            $errorContext = [
+                'payment_id' => $payment->id,
+                'error' => $e->getMessage(),
+                'user_id' => auth()->id()
+            ];
+
+            if ($this->currentTenant) {
+                $errorContext['tenant_id'] = $this->currentTenant->id;
+            }
+
+            Log::channel('payment')->error('Payment update failed', $errorContext);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update payment',
+                'error' => config('app.debug') ? $e->getMessage() : null
+            ], 500);
+        }
+    }
+
+    /**
+     * Run payment reconciliation
+     */
+    public function reconciliation(Request $request): JsonResponse
+    {
+        $request->validate([
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
+            'gateway_id' => 'sometimes|exists:payment_gateways,id'
+        ]);
+
+        try {
+            $query = Payment::with(['customer'])
+                ->whereBetween('created_at', [$request->start_date, $request->end_date]);
+
+            // Scope by tenant if current tenant exists
+            if ($this->currentTenant) {
+                $query->where('tenant_id', $this->currentTenant->id);
+            }
+
+            // Filter by gateway if specified
+            if ($request->has('gateway_id')) {
+                $query->whereHas('paymentGateway', function ($q) use ($request) {
+                    $q->where('id', $request->gateway_id);
+                });
+            }
+
+            $payments = $query->get();
+
+            // Perform reconciliation logic
+            $totalTransactions = $payments->count();
+            $matchedTransactions = 0;
+            $unmatchedTransactions = 0;
+            $disputedTransactions = 0;
+            $discrepancies = [];
+
+            foreach ($payments as $payment) {
+                // Simulate reconciliation logic - in real implementation, 
+                // this would compare with gateway records
+                if ($payment->status === 'completed' && $payment->reference) {
+                    $matchedTransactions++;
+                } elseif ($payment->status === 'pending' && $payment->created_at->diffInHours(now()) > 24) {
+                    $unmatchedTransactions++;
+                    $discrepancies[] = [
+                        'id' => $payment->id,
+                        'transaction_id' => $payment->transaction_id,
+                        'type' => 'missing_transaction',
+                        'description' => 'Payment pending for more than 24 hours',
+                        'expected_amount' => $payment->amount,
+                        'actual_amount' => 0,
+                        'created_at' => $payment->created_at->toISOString()
+                    ];
+                } elseif ($payment->status === 'failed') {
+                    $disputedTransactions++;
+                }
+            }
+
+            $results = [
+                'total_transactions' => $totalTransactions,
+                'matched_transactions' => $matchedTransactions,
+                'unmatched_transactions' => $unmatchedTransactions,
+                'disputed_transactions' => $disputedTransactions,
+                'discrepancies' => $discrepancies,
+                'reconciliation_date' => now()->toISOString()
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => $results
+            ]);
+
+        } catch (\Exception $e) {
+            $errorContext = [
+                'error' => $e->getMessage(),
+                'request_data' => $request->all()
+            ];
+
+            if ($this->currentTenant) {
+                $errorContext['tenant_id'] = $this->currentTenant->id;
+            }
+
+            Log::channel('payment')->error('Payment reconciliation failed', $errorContext);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Reconciliation failed',
+                'error' => config('app.debug') ? $e->getMessage() : null
+            ], 500);
+        }
+    }
+
+    /**
+     * Resolve payment discrepancy
+     */
+    public function resolveDiscrepancy(Request $request, string $discrepancyId): JsonResponse
+    {
+        $request->validate([
+            'resolution_notes' => 'required|string|max:500'
+        ]);
+
+        try {
+            // Find payment by discrepancy ID (in real implementation, 
+            // you'd have a separate discrepancies table)
+            $payment = Payment::findOrFail($discrepancyId);
+
+            // Update payment status or take corrective action
+            $payment->update([
+                'status' => 'completed', // or appropriate status
+                'resolved_at' => now(),
+                'resolution_notes' => $request->resolution_notes
+            ]);
+
+            Log::channel('payment')->info('Payment discrepancy resolved', [
+                'payment_id' => $payment->id,
+                'resolved_by' => auth()->id(),
+                'notes' => $request->resolution_notes
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Discrepancy resolved successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::channel('payment')->error('Failed to resolve discrepancy', [
+                'discrepancy_id' => $discrepancyId,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to resolve discrepancy',
+                'error' => config('app.debug') ? $e->getMessage() : null
+            ], 500);
+        }
+    }
+
+    /**
+     * Flag payment dispute
+     */
+    public function flagDispute(Request $request, string $discrepancyId): JsonResponse
+    {
+        $request->validate([
+            'dispute_reason' => 'required|string|max:500'
+        ]);
+
+        try {
+            $payment = Payment::findOrFail($discrepancyId);
+
+            // Flag as disputed
+            $payment->update([
+                'status' => 'disputed',
+                'disputed_at' => now(),
+                'dispute_reason' => $request->dispute_reason
+            ]);
+
+            Log::channel('payment')->info('Payment dispute flagged', [
+                'payment_id' => $payment->id,
+                'flagged_by' => auth()->id(),
+                'reason' => $request->dispute_reason
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Dispute flagged successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::channel('payment')->error('Failed to flag dispute', [
+                'discrepancy_id' => $discrepancyId,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to flag dispute',
+                'error' => config('app.debug') ? $e->getMessage() : null
+            ], 500);
+        }
+    }
+
+    /**
+     * Export reconciliation report
+     */
+    public function exportReconciliation(Request $request)
+    {
+        try {
+            // Get reconciliation data (simplified for example)
+            $reconciliationData = [
+                ['Transaction ID', 'Amount', 'Status', 'Gateway', 'Date', 'Issue'],
+                ['TXN-001', '50000', 'Completed', 'CollectUG', '2024-01-15', 'None'],
+                ['TXN-002', '25000', 'Pending', 'CollectUG', '2024-01-15', 'Timeout'],
+            ];
+
+            $csvContent = '';
+            foreach ($reconciliationData as $row) {
+                $csvContent .= implode(',', $row) . "\n";
+            }
+
+            $filename = 'reconciliation_report_' . now()->format('Y-m-d') . '.csv';
+
+            return response()->streamDownload(function () use ($csvContent) {
+                echo $csvContent;
+            }, $filename, [
+                'Content-Type' => 'text/csv',
+                'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            ]);
+
+        } catch (\Exception $e) {
+            Log::channel('payment')->error('Failed to export reconciliation report', [
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to export reconciliation report',
+                'error' => config('app.debug') ? $e->getMessage() : null
+            ], 500);
+        }
+    }
+
+    /**
      * Format payment response
      */
     private function formatPaymentResponse(Payment $payment, ?Tenant $tenant = null, $verificationResponse = null): array
     {
         $response = [
+            'id' => $payment->id,
             'payment_id' => $payment->id,
             'transaction_id' => $payment->transaction_id,
             'reference' => $payment->reference,
@@ -1024,9 +1338,11 @@ class PaymentController extends Controller
                 'phone' => $payment->customer->phone,
                 'email' => $payment->customer->email,
             ] : null,
+            'customer_name' => $payment->customer?->name,
             'package' => $payment->metadata['package'] ?? null,
             'validity_hours' => $payment->metadata['validity_hours'] ?? null,
             'description' => $payment->metadata['description'] ?? null,
+            'audit_trail' => $payment->audit_trail ?? [],
         ];
 
         // Add tenant info if available

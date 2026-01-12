@@ -419,7 +419,7 @@ import { useAppStore } from '@/store/modules/app'
 import DataTable from '@/components/common/DataTable.vue'
 import Modal from '@/components/common/Modal.vue'
 import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
-import { api } from '@/api'
+import api from '@/api/index'
 import { debounce } from 'lodash-es'
 
 // Types
@@ -560,7 +560,7 @@ const loadVouchers = async (page = 1) => {
     if (filters.end_date) params.append('end_date', filters.end_date)
     if (searchQuery.value) params.append('search', searchQuery.value)
     
-    const response = await api.get(`/vouchers?${params}`)
+    const response = await api.get(`/api/v1/vouchers?${params}`)
     
     if (response.data.success) {
       vouchers.value = response.data.data.vouchers
@@ -580,7 +580,7 @@ const loadVouchers = async (page = 1) => {
 
 const loadStatistics = async () => {
   try {
-    const response = await api.get('/vouchers/statistics')
+    const response = await api.get('/api/v1/vouchers/statistics')
     if (response.data.success) {
       statistics.value = response.data.data.overall_statistics
     }
@@ -610,7 +610,7 @@ const generateBulkVouchers = async () => {
       }
     }, 500)
     
-    const response = await api.post('/vouchers/batch-generate', {
+    const response = await api.post('/api/v1/vouchers/batch-generate', {
       vouchers: batchData
     })
     
@@ -653,7 +653,7 @@ const viewVoucherDetails = async (voucher: Voucher) => {
   
   // Load usage data
   try {
-    const response = await api.get(`/vouchers/${voucher.code}`)
+    const response = await api.get(`/api/v1/vouchers/${voucher.code}`)
     if (response.data.success) {
       selectedVoucher.value = response.data.data.voucher
       voucherUsage.value = response.data.data
@@ -667,7 +667,7 @@ const resendSms = async (voucher: Voucher) => {
   try {
     isSendingSms.value[voucher.id] = true
     
-    const response = await api.post(`/vouchers/${voucher.code}/resend-sms`)
+    const response = await api.post(`/api/v1/vouchers/${voucher.code}/resend-sms`)
     
     if (response.data.success) {
       appStore.addNotification({
@@ -692,7 +692,7 @@ const disableVoucher = async (voucher: Voucher) => {
   }
   
   try {
-    const response = await api.post(`/vouchers/${voucher.code}/disable`)
+    const response = await api.post(`/api/v1/vouchers/${voucher.code}/disable`)
     
     if (response.data.success) {
       appStore.addNotification({

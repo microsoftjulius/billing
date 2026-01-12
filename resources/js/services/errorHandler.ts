@@ -663,10 +663,12 @@ export const errorHandler = new ErrorHandlerService();
 export const setupGlobalErrorHandling = (): void => {
   // Handle unhandled promise rejections
   window.addEventListener('unhandledrejection', (event) => {
-    console.error('Unhandled promise rejection:', event.reason);
+    console.warn('Unhandled promise rejection:', event.reason);
+    // Don't show notifications for promise rejections - just log them
     errorHandler.handleRuntimeError(
       new Error(`Unhandled promise rejection: ${event.reason}`),
       {
+        showNotification: false, // Don't show notifications
         context: {
           component: 'Global',
           action: 'unhandledrejection'
@@ -677,8 +679,10 @@ export const setupGlobalErrorHandling = (): void => {
 
   // Handle uncaught JavaScript errors
   window.addEventListener('error', (event) => {
-    console.error('Uncaught error:', event.error);
+    console.warn('Uncaught error:', event.error);
+    // Don't show notifications for JS errors - just log them
     errorHandler.handleRuntimeError(event.error || new Error(event.message), {
+      showNotification: false, // Don't show notifications
       context: {
         component: 'Global',
         action: 'error',
@@ -711,7 +715,7 @@ export const setupGlobalErrorHandling = (): void => {
       type: 'warning',
       title: 'Connection Lost',
       message: 'You are currently offline. Some features may not work properly.',
-      duration: 0 // Persistent while offline
+      duration: 8000 // Not persistent - let user dismiss
     });
   });
 

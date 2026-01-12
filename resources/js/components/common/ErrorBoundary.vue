@@ -139,6 +139,8 @@ const canRetry = computed(() => retryCount.value < maxRetries);
 
 onErrorCaptured((error: Error, instance: any, info: string) => {
   console.error('Error boundary caught error:', error, info);
+  console.error('Error stack:', error.stack);
+  console.error('Component info:', info);
   
   hasError.value = true;
   errorDetails.value = {
@@ -242,6 +244,7 @@ const refresh = () => {
 // Handle global errors that might not be caught by onErrorCaptured
 onMounted(() => {
   const handleGlobalError = (event: ErrorEvent) => {
+    console.error('Global error caught by ErrorBoundary:', event.error, event.message);
     if (!hasError.value) {
       hasError.value = true;
       errorDetails.value = {
@@ -255,6 +258,7 @@ onMounted(() => {
   };
 
   const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+    console.error('Unhandled promise rejection caught by ErrorBoundary:', event.reason);
     if (!hasError.value) {
       hasError.value = true;
       errorDetails.value = {

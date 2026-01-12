@@ -74,6 +74,13 @@
             Details
           </button>
           <button 
+            @click="configureDevice(device)"
+            class="btn btn-sm btn-primary"
+          >
+            <i class="fas fa-cog"></i>
+            Configure
+          </button>
+          <button 
             @click="viewDeviceLogs(device)"
             class="btn btn-sm btn-outline"
           >
@@ -228,6 +235,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRealtimeStore } from '@/store/modules/realtime';
 import { useAppStore } from '@/store/modules/app';
+import { useRouter } from 'vue-router';
 import ConnectionStatus from '@/components/common/ConnectionStatus.vue';
 import Modal from '@/components/common/Modal.vue';
 import type { MikroTikDevice } from '@/types';
@@ -236,6 +244,7 @@ import axios from 'axios';
 // Store references
 const realtimeStore = useRealtimeStore();
 const appStore = useAppStore();
+const router = useRouter();
 
 // Component state
 const isRefreshing = ref(false);
@@ -359,7 +368,7 @@ const formatDate = (dateString: string): string => {
 const fetchDevices = async (): Promise<void> => {
   try {
     isRefreshing.value = true;
-    const response = await axios.get('/api/mikrotik/devices');
+    const response = await axios.get('/api/v1/router/status');
     realtimeStore.updateMikroTikDevices(response.data.data);
   } catch (error) {
     console.error('Failed to fetch MikroTik devices:', error);
@@ -375,7 +384,7 @@ const fetchDevices = async (): Promise<void> => {
 
 const fetchDeviceStatus = async (): Promise<void> => {
   try {
-    const response = await axios.get('/api/mikrotik/status');
+    const response = await axios.get('/api/v1/router/status');
     const statusUpdates = response.data.data;
     
     statusUpdates.forEach((update: any) => {
@@ -393,7 +402,7 @@ const fetchDeviceStatus = async (): Promise<void> => {
 
 const fetchDeviceLogs = async (deviceId: string): Promise<void> => {
   try {
-    const response = await axios.get(`/api/mikrotik/devices/${deviceId}/logs`);
+    const response = await axios.get(`/api/v1/router/interfaces`);
     deviceLogs.value = response.data.data;
   } catch (error) {
     console.error('Failed to fetch device logs:', error);
@@ -414,6 +423,14 @@ const refreshDevices = async (): Promise<void> => {
 const viewDeviceDetails = (device: MikroTikDevice): void => {
   selectedDevice.value = device;
   showDetailsModal.value = true;
+};
+
+const configureDevice = (device: MikroTikDevice): void => {
+  // Navigate to the configuration page with the device ID
+  router.push({
+    name: 'mikrotik-config',
+    query: { deviceId: device.id }
+  });
 };
 
 const viewDeviceLogs = async (device: MikroTikDevice): Promise<void> => {

@@ -59,7 +59,7 @@
 
 <script>
 import Modal from './Modal.vue'
-import { CheckCircleIcon, ExclamationTriangleIcon, QuestionMarkCircleIcon, InformationCircleIcon, ExclamationCircleIcon } from '@heroicons/vue/outline'
+import { CheckCircleIcon, ExclamationTriangleIcon, QuestionMarkCircleIcon, InformationCircleIcon, ExclamationCircleIcon } from '@heroicons/vue/24/outline'
 
 export default {
     name: 'ConfirmDialog',

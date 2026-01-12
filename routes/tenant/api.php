@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RouterController;
+use App\Http\Controllers\Api\RouterManagementController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\SettingController;
 
@@ -77,6 +78,16 @@ Route::prefix('v1')->group(function () {
             Route::get('/hotspot-profiles', [RouterController::class, 'hotspotProfiles'])->name('tenant.router.hotspot-profiles');
             Route::post('/sync-vouchers', [RouterController::class, 'syncVouchers'])->name('tenant.router.sync-vouchers');
             Route::post('/cleanup-expired', [RouterController::class, 'cleanupExpired'])->name('tenant.router.cleanup-expired');
+        });
+
+        // Router Management
+        Route::prefix('router-management')->group(function () {
+            Route::get('/', [RouterManagementController::class, 'index'])->name('tenant.router-management.index');
+            Route::post('/', [RouterManagementController::class, 'store'])->name('tenant.router-management.store');
+            Route::get('/{id}', [RouterManagementController::class, 'show'])->name('tenant.router-management.show');
+            Route::put('/{id}', [RouterManagementController::class, 'update'])->name('tenant.router-management.update');
+            Route::delete('/{id}', [RouterManagementController::class, 'destroy'])->name('tenant.router-management.destroy');
+            Route::post('/test-connection', [RouterManagementController::class, 'testConnection'])->name('tenant.router-management.test-connection');
         });
 
         // Reports

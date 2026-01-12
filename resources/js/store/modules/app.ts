@@ -9,6 +9,7 @@ export const useAppStore = defineStore('app', () => {
   const notifications = ref<Notification[]>([]);
   const isLoading = ref(false);
   const sidebarCollapsed = ref(false);
+  const isInitialized = ref(false);
 
   // Getters
   const isAuthenticated = computed(() => !!user.value);
@@ -151,65 +152,80 @@ export const useAppStore = defineStore('app', () => {
   };
 
   const initializeApp = () => {
-    // Initialize theme from localStorage with fallback
-    const savedTheme = localStorage.getItem('theme') as Theme;
-    if (savedTheme && ['light', 'dark', 'system'].includes(savedTheme)) {
-      setTheme(savedTheme);
-    } else {
-      // Default to system theme if no preference is saved
-      setTheme('system');
+    // Prevent multiple initializations
+    if (isInitialized.value) {
+      return;
     }
-
-    // Initialize sidebar state
-    const savedSidebarState = localStorage.getItem('sidebar-collapsed');
-    if (savedSidebarState) {
-      sidebarCollapsed.value = savedSidebarState === 'true';
-    }
-
-    // Check for existing authentication
-    const savedToken = localStorage.getItem('auth_token');
-    const savedUser = localStorage.getItem('user');
     
-    if (savedToken && savedUser) {
-      try {
-        const userData = JSON.parse(savedUser);
-        setUser(userData);
-        
-        // Set axios default authorization header if axios is available
-        if (typeof window !== 'undefined' && (window as any).axios) {
-          (window as any).axios.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`;
+    try {
+      // Initialize theme from localStorage with fallback
+      const savedTheme = localStorage.getItem('theme') as Theme;
+      if (savedTheme && ['light', 'dark', 'system'].includes(savedTheme)) {
+        setTheme(savedTheme);
+      } else {
+        // Default to system theme if no preference is saved
+        setTheme('system');
+      }
+
+      // Initialize sidebar state
+      const savedSidebarState = localStorage.getItem('sidebar-collapsed');
+      if (savedSidebarState) {
+        sidebarCollapsed.value = savedSidebarState === 'true';
+      }
+
+      // Check for existing authentication
+      const savedToken = localStorage.getItem('auth_token');
+      const savedUser = localStorage.getItem('user');
+      
+      if (savedToken && savedUser) {
+        try {
+          const userData = JSON.parse(savedUser);
+          setUser(userData);
+          
+          // Set axios default authorization header if axios is available
+          if (typeof window !== 'undefined' && (window as any).axios) {
+            (window as any).axios.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`;
+          }
+        } catch (error) {
+          console.warn('Failed to parse saved user data:', error);
+          // Clear invalid stored data
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('user');
         }
-      } catch (error) {
-        // Clear invalid stored data
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('user');
       }
-    }
 
-    // Listen for system theme changes with improved handling
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleSystemThemeChange = (e: MediaQueryListEvent) => {
-      if (theme.value === 'system') {
-        // Re-apply system theme when system preference changes
-        const root = document.documentElement;
-        const appliedTheme = e.matches ? 'dark' : 'light';
-        root.setAttribute('data-theme', appliedTheme);
-        root.className = root.className.replace(/theme-\w+/g, '');
-        root.classList.add(`theme-${appliedTheme}`);
-        
-        // Dispatch theme change event
-        window.dispatchEvent(new CustomEvent('themeChanged', {
-          detail: { theme: 'system', appliedTheme }
-        }));
+      // Listen for system theme changes with improved handling
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const handleSystemThemeChange = (e: MediaQueryListEvent) => {
+        if (theme.value === 'system') {
+          // Re-apply system theme when system preference changes
+          const root = document.documentElement;
+          const appliedTheme = e.matches ? 'dark' : 'light';
+          root.setAttribute('data-theme', appliedTheme);
+          root.className = root.className.replace(/theme-\w+/g, '');
+          root.classList.add(`theme-${appliedTheme}`);
+          
+          // Dispatch theme change event
+          window.dispatchEvent(new CustomEvent('themeChanged', {
+            detail: { theme: 'system', appliedTheme }
+          }));
+        }
+      };
+      
+      // Use the newer addEventListener method with fallback
+      if (mediaQuery.addEventListener) {
+        mediaQuery.addEventListener('change', handleSystemThemeChange);
+      } else {
+        // Fallback for older browsers
+        mediaQuery.addListener(handleSystemThemeChange);
       }
-    };
-    
-    // Use the newer addEventListener method with fallback
-    if (mediaQuery.addEventListener) {
-      mediaQuery.addEventListener('change', handleSystemThemeChange);
-    } else {
-      // Fallback for older browsers
-      mediaQuery.addListener(handleSystemThemeChange);
+      
+      // Mark as initialized
+      isInitialized.value = true;
+    } catch (error) {
+      console.error('Failed to initialize app:', error);
+      // Mark as initialized even if there was an error to prevent infinite loops
+      isInitialized.value = true;
     }
   };
 
@@ -220,6 +236,7 @@ export const useAppStore = defineStore('app', () => {
     notifications,
     isLoading,
     sidebarCollapsed,
+    isInitialized,
     
     // Getters
     isAuthenticated,

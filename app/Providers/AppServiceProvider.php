@@ -67,6 +67,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Configure tenancy commands for console
         $this->configureConsoleTenancy();
+
+        // Register model observers
+        $this->registerObservers();
     }
 
     /**
@@ -130,5 +133,13 @@ class AppServiceProvider extends ServiceProvider
         if (! $this->app->runningInConsole()) {
             return;
         }
+    }
+
+    /**
+     * Register model observers.
+     */
+    private function registerObservers(): void
+    {
+        \App\Models\MikroTikDevice::observe(\App\Observers\MikroTikDeviceObserver::class);
     }
 }

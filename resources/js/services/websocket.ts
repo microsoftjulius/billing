@@ -38,12 +38,23 @@ class WebSocketService {
     }
 
     try {
+      // Check if required environment variables are available
+      const appKey = import.meta.env.VITE_REVERB_APP_KEY;
+      const wsHost = import.meta.env.VITE_REVERB_HOST;
+      const wsPort = import.meta.env.VITE_REVERB_PORT;
+
+      if (!appKey || !wsHost || !wsPort) {
+        console.warn('WebSocket configuration missing, skipping initialization');
+        this.getRealtimeStore().setConnectionStatus('disconnected');
+        return;
+      }
+
       this.echo = new Echo({
         broadcaster: 'reverb',
-        key: import.meta.env.VITE_REVERB_APP_KEY,
-        wsHost: import.meta.env.VITE_REVERB_HOST,
-        wsPort: import.meta.env.VITE_REVERB_PORT,
-        wssPort: import.meta.env.VITE_REVERB_PORT,
+        key: appKey,
+        wsHost: wsHost,
+        wsPort: wsPort,
+        wssPort: wsPort,
         forceTLS: import.meta.env.VITE_REVERB_SCHEME === 'https',
         enabledTransports: ['ws', 'wss'],
         disableStats: true,
@@ -58,7 +69,12 @@ class WebSocketService {
       this.setupChannelSubscriptions();
       this.startHeartbeat();
     } catch (error) {
+      console.warn('WebSocket initialization failed:', error);
+      this.getRealtimeStore().setConnectionStatus('disconnected');
+      
+      // Only log to error handler, don't throw
       errorHandler.handleWebSocketError(error as Error, {
+        showNotification: false, // Don't show notification on initial failure
         context: {
           component: 'WebSocket',
           action: 'initialize',
@@ -86,91 +102,101 @@ class WebSocketService {
     const realtimeStore = this.getRealtimeStore();
     const appStore = this.getAppStore();
 
-    // Connection established
-    this.echo.connector.pusher.connection.bind('connected', () => {
-      console.log('WebSocket connected');
-      realtimeStore.setConnectionStatus('connected');
-      realtimeStore.resetReconnectAttempts();
-      this.connectionAttempts = 0;
-      this.clearReconnectTimer();
-      
-      // Show success notification if this was a reconnection
-      if (this.connectionAttempts > 0) {
-        appStore.addNotification({
-          type: 'success',
-          title: 'Connection Restored',
-          message: 'Real-time connection has been restored.',
-          duration: 3000
-        });
-      }
-    });
-
-    // Connection lost
-    this.echo.connector.pusher.connection.bind('disconnected', () => {
-      console.log('WebSocket disconnected');
-      realtimeStore.setConnectionStatus('disconnected');
-      this.scheduleReconnect();
-    });
-
-    // Connection error
-    this.echo.connector.pusher.connection.bind('error', (error: any) => {
-      console.error('WebSocket error:', error);
-      realtimeStore.setConnectionStatus('disconnected');
-      
-      errorHandler.handleWebSocketError(new Error(`WebSocket connection error: ${error.type || 'unknown'}`), {
-        context: {
-          component: 'WebSocket',
-          action: 'connection_error',
-          additionalData: {
-            errorType: error.type,
-            errorData: error.data,
-            attempt: this.connectionAttempts
-          }
-        }
-      });
-      
-      this.scheduleReconnect();
-    });
-
-    // Connection state change
-    this.echo.connector.pusher.connection.bind('state_change', (states: any) => {
-      console.log('WebSocket state change:', states);
-      
-      if (states.current === 'connecting' || states.current === 'reconnecting') {
-        realtimeStore.setConnectionStatus('reconnecting');
-      } else if (states.current === 'connected') {
+    try {
+      // Connection established
+      this.echo.connector.pusher.connection.bind('connected', () => {
+        console.log('WebSocket connected');
         realtimeStore.setConnectionStatus('connected');
-      } else if (states.current === 'disconnected' || states.current === 'failed') {
-        realtimeStore.setConnectionStatus('disconnected');
+        realtimeStore.resetReconnectAttempts();
+        this.connectionAttempts = 0;
+        this.clearReconnectTimer();
         
-        if (states.current === 'failed') {
-          errorHandler.handleWebSocketError(new Error('WebSocket connection failed'), {
-            context: {
-              component: 'WebSocket',
-              action: 'connection_failed',
-              additionalData: {
-                previousState: states.previous,
-                currentState: states.current
-              }
-            }
+        // Show success notification if this was a reconnection
+        if (this.connectionAttempts > 0) {
+          appStore.addNotification({
+            type: 'success',
+            title: 'Connection Restored',
+            message: 'Real-time connection has been restored.',
+            duration: 3000
           });
         }
-      }
-    });
+      });
 
-    // Handle subscription errors
-    this.echo.connector.pusher.connection.bind('subscription_error', (error: any) => {
-      errorHandler.handleWebSocketError(new Error(`WebSocket subscription error: ${error.error}`), {
-        context: {
-          component: 'WebSocket',
-          action: 'subscription_error',
-          additionalData: {
-            channel: error.channel,
-            error: error.error
+      // Connection lost
+      this.echo.connector.pusher.connection.bind('disconnected', () => {
+        console.log('WebSocket disconnected');
+        realtimeStore.setConnectionStatus('disconnected');
+        this.scheduleReconnect();
+      });
+
+      // Connection error
+      this.echo.connector.pusher.connection.bind('error', (error: any) => {
+        console.warn('WebSocket error:', error);
+        realtimeStore.setConnectionStatus('disconnected');
+        
+        // Only log error, don't show notification for connection errors
+        errorHandler.handleWebSocketError(new Error(`WebSocket connection error: ${error.type || 'unknown'}`), {
+          showNotification: false,
+          context: {
+            component: 'WebSocket',
+            action: 'connection_error',
+            additionalData: {
+              errorType: error.type,
+              errorData: error.data,
+              attempt: this.connectionAttempts
+            }
+          }
+        });
+        
+        this.scheduleReconnect();
+      });
+
+      // Connection state change
+      this.echo.connector.pusher.connection.bind('state_change', (states: any) => {
+        console.log('WebSocket state change:', states);
+        
+        if (states.current === 'connecting' || states.current === 'reconnecting') {
+          realtimeStore.setConnectionStatus('reconnecting');
+        } else if (states.current === 'connected') {
+          realtimeStore.setConnectionStatus('connected');
+        } else if (states.current === 'disconnected' || states.current === 'failed') {
+          realtimeStore.setConnectionStatus('disconnected');
+          
+          if (states.current === 'failed') {
+            errorHandler.handleWebSocketError(new Error('WebSocket connection failed'), {
+              showNotification: false, // Don't show notification for connection failures
+              context: {
+                component: 'WebSocket',
+                action: 'connection_failed',
+                additionalData: {
+                  previousState: states.previous,
+                  currentState: states.current
+                }
+              }
+            });
           }
         }
       });
-    });
+
+      // Handle subscription errors
+      this.echo.connector.pusher.connection.bind('subscription_error', (error: any) => {
+        console.warn('WebSocket subscription error:', error);
+        errorHandler.handleWebSocketError(new Error(`WebSocket subscription error: ${error.error}`), {
+          showNotification: false, // Don't show notification for subscription errors
+          context: {
+            component: 'WebSocket',
+            action: 'subscription_error',
+            additionalData: {
+              channel: error.channel,
+              error: error.error
+            }
+          }
+        });
+      });
+    } catch (error) {
+      console.warn('Failed to setup WebSocket event listeners:', error);
+      realtimeStore.setConnectionStatus('disconnected');
+    }
   }
 
   /**
