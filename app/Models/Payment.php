@@ -31,7 +31,8 @@ class Payment extends BaseModel
         'resolved_at',
         'resolution_notes',
         'disputed_at',
-        'dispute_reason'
+        'dispute_reason',
+        'tenant_id'
     ];
 
     protected $casts = [

@@ -633,4 +633,498 @@ class VoucherService
             ];
         }
     }
+
+    /**
+     * Advanced voucher generation with customizable parameters
+     */
+    public function generateAdvancedVoucher(array $parameters): VoucherModel
+    {
+        DB::beginTransaction();
+
+        try {
+            // Generate unique voucher code with custom prefix if provided
+            $prefix = $parameters['code_prefix'] ?? 'BIL';
+            $code = $this->generateUniqueCodeWithPrefix($prefix);
+            $password = $parameters['password'] ?? Str::random(8);
+
+            // Determine package details from parameters
+            $profile = $parameters['profile'];
+            $validityHours = $parameters['validity_hours'];
+            $dataLimitMB = $parameters['data_limit_mb'] ?? null;
+            $price = $parameters['price'] ?? 0;
+            $currency = $parameters['currency'] ?? 'UGX';
+            $customerId = $parameters['customer_id'] ?? null;
+            $paymentId = $parameters['payment_id'] ?? null;
+
+            // Create voucher DTO for router
+            $voucherDTO = VoucherDTO::create(
+                code: $code,
+                password: $password,
+                profile: $profile,
+                validityHours: $validityHours,
+                dataLimitMB: $dataLimitMB,
+                price: $price,
+                currency: $currency,
+                customerName: $parameters['customer_name'] ?? null,
+                customerPhone: $parameters['customer_phone'] ?? null,
+                customerEmail: $parameters['customer_email'] ?? null,
+                createdAt: now(),
+                expiresAt: now()->addHours($validityHours),
+                metadata: array_merge([
+                    'advanced_generation' => true,
+                    'generation_parameters' => $parameters
+                ], $parameters['metadata'] ?? [])
+            );
+
+            // Create voucher on MikroTik FIRST
+            $voucherCreated = $this->mikrotik->createVoucher($voucherDTO);
+
+            if (!$voucherCreated) {
+                throw new \Exception('Failed to create voucher on MikroTik router');
+            }
+
+            // Create voucher in database
+            $voucher = VoucherModel::create([
+                'uuid' => Str::orderedUuid(),
+                'customer_id' => $customerId,
+                'payment_id' => $paymentId,
+                'code' => $code,
+                'password' => $password,
+                'profile' => $profile,
+                'validity_hours' => $validityHours,
+                'data_limit_mb' => $dataLimitMB,
+                'price' => $price,
+                'currency' => $currency,
+                'status' => $parameters['auto_activate'] ?? true ? 'active' : 'pending',
+                'activated_at' => $parameters['auto_activate'] ?? true ? now() : null,
+                'expires_at' => $parameters['auto_activate'] ?? true ? now()->addHours($validityHours) : null,
+                'router_metadata' => [
+                    'created_on_router' => true,
+                    'created_at' => now()->toISOString(),
+                    'advanced_generation' => true
+                ],
+                'metadata' => array_merge([
+                    'advanced_generation' => true,
+                    'generated_at' => now()->toISOString(),
+                    'generation_parameters' => $parameters
+                ], $parameters['metadata'] ?? [])
+            ]);
+
+            // Send voucher via SMS if requested and customer phone is provided
+            if (($parameters['send_sms'] ?? false) && !empty($parameters['customer_phone'])) {
+                $smsSent = $this->smsService->sendVoucher($parameters['customer_phone'], $voucher);
+                if ($smsSent) {
+                    $voucher->markSmsSent();
+                }
+            }
+
+            DB::commit();
+
+            Log::channel('voucher')->info('Advanced voucher generated successfully', [
+                'voucher_id' => $voucher->id,
+                'code' => $code,
+                'profile' => $profile,
+                'validity_hours' => $validityHours,
+                'parameters' => $parameters
+            ]);
+
+            return $voucher;
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            Log::channel('voucher')->error('Advanced voucher generation failed', [
+                'parameters' => $parameters,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Transfer voucher between customers
+     */
+    public function transferVoucher(string $voucherCode, string $newCustomerId, ?string $reason = null): array
+    {
+        DB::beginTransaction();
+
+        try {
+            $voucher = VoucherModel::where('code', $voucherCode)->firstOrFail();
+            $newCustomer = \App\Models\Customer::findOrFail($newCustomerId);
+            $oldCustomer = $voucher->customer;
+
+            // Validate transfer conditions
+            if (!$voucher->isUsable()) {
+                throw new \Exception('Cannot transfer inactive, expired, or used voucher');
+            }
+
+            // Store old customer info for audit
+            $oldCustomerId = $voucher->customer_id;
+            $oldCustomerName = $oldCustomer?->name;
+
+            // Update voucher customer
+            $voucher->update([
+                'customer_id' => $newCustomerId,
+                'metadata' => array_merge($voucher->metadata ?? [], [
+                    'transfer_history' => array_merge(
+                        $voucher->metadata['transfer_history'] ?? [],
+                        [[
+                            'from_customer_id' => $oldCustomerId,
+                            'from_customer_name' => $oldCustomerName,
+                            'to_customer_id' => $newCustomerId,
+                            'to_customer_name' => $newCustomer->name,
+                            'transferred_at' => now()->toISOString(),
+                            'reason' => $reason,
+                            'transferred_by' => auth()->id() ?? 'system'
+                        ]]
+                    )
+                ])
+            ]);
+
+            // Send SMS notification to new customer if they have a phone
+            if ($newCustomer->phone) {
+                $smsSent = $this->smsService->sendVoucherTransfer($newCustomer->phone, $voucher, $oldCustomerName);
+                if ($smsSent) {
+                    $voucher->update(['sms_sent_at' => now()]);
+                }
+            }
+
+            DB::commit();
+
+            Log::channel('voucher')->info('Voucher transferred successfully', [
+                'voucher_id' => $voucher->id,
+                'code' => $voucherCode,
+                'from_customer_id' => $oldCustomerId,
+                'to_customer_id' => $newCustomerId,
+                'reason' => $reason,
+                'transferred_by' => auth()->id() ?? 'system'
+            ]);
+
+            return [
+                'success' => true,
+                'message' => 'Voucher transferred successfully',
+                'voucher' => [
+                    'code' => $voucher->code,
+                    'old_customer' => $oldCustomerName,
+                    'new_customer' => $newCustomer->name,
+                    'transferred_at' => now()->toISOString()
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            Log::channel('voucher')->error('Voucher transfer failed', [
+                'voucher_code' => $voucherCode,
+                'new_customer_id' => $newCustomerId,
+                'reason' => $reason,
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Failed to transfer voucher: ' . $e->getMessage(),
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Refund and cancel voucher
+     */
+    public function refundVoucher(string $voucherCode, array $refundData): array
+    {
+        DB::beginTransaction();
+
+        try {
+            $voucher = VoucherModel::where('code', $voucherCode)->firstOrFail();
+
+            // Validate refund conditions
+            if ($voucher->status === 'used') {
+                throw new \Exception('Cannot refund used voucher');
+            }
+
+            if ($voucher->status === 'expired' && !($refundData['allow_expired_refund'] ?? false)) {
+                throw new \Exception('Cannot refund expired voucher');
+            }
+
+            // Calculate refund amount
+            $refundAmount = $refundData['refund_amount'] ?? $voucher->price;
+            $refundReason = $refundData['reason'] ?? 'Customer request';
+            $refundMethod = $refundData['method'] ?? 'manual';
+
+            // Disable voucher on MikroTik
+            $this->mikrotik->disableVoucher($voucherCode);
+
+            // Update voucher status
+            $voucher->update([
+                'status' => 'disabled',
+                'metadata' => array_merge($voucher->metadata ?? [], [
+                    'refund_info' => [
+                        'refunded' => true,
+                        'refund_amount' => $refundAmount,
+                        'refund_reason' => $refundReason,
+                        'refund_method' => $refundMethod,
+                        'refunded_at' => now()->toISOString(),
+                        'refunded_by' => auth()->id() ?? 'system',
+                        'original_price' => $voucher->price
+                    ]
+                ])
+            ]);
+
+            // Create refund record if payment exists
+            if ($voucher->payment_id && $refundMethod === 'automatic') {
+                // Here you would integrate with payment gateway to process refund
+                // For now, we'll just log the refund request
+                Log::channel('voucher')->info('Refund requested for payment gateway', [
+                    'voucher_id' => $voucher->id,
+                    'payment_id' => $voucher->payment_id,
+                    'refund_amount' => $refundAmount
+                ]);
+            }
+
+            DB::commit();
+
+            Log::channel('voucher')->info('Voucher refunded successfully', [
+                'voucher_id' => $voucher->id,
+                'code' => $voucherCode,
+                'refund_amount' => $refundAmount,
+                'refund_reason' => $refundReason,
+                'refunded_by' => auth()->id() ?? 'system'
+            ]);
+
+            return [
+                'success' => true,
+                'message' => 'Voucher refunded successfully',
+                'refund' => [
+                    'voucher_code' => $voucherCode,
+                    'refund_amount' => $refundAmount,
+                    'refund_reason' => $refundReason,
+                    'refunded_at' => now()->toISOString()
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            Log::channel('voucher')->error('Voucher refund failed', [
+                'voucher_code' => $voucherCode,
+                'refund_data' => $refundData,
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Failed to refund voucher: ' . $e->getMessage(),
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Get comprehensive voucher analytics
+     */
+    public function getVoucherAnalytics(array $filters = []): array
+    {
+        try {
+            $query = VoucherModel::with(['customer', 'payment']);
+
+            // Apply date filters
+            if (!empty($filters['start_date'])) {
+                $query->whereDate('created_at', '>=', $filters['start_date']);
+            }
+            if (!empty($filters['end_date'])) {
+                $query->whereDate('created_at', '<=', $filters['end_date']);
+            }
+
+            // Apply other filters
+            if (!empty($filters['profile'])) {
+                $query->where('profile', $filters['profile']);
+            }
+            if (!empty($filters['status'])) {
+                $query->where('status', $filters['status']);
+            }
+
+            $vouchers = $query->get();
+
+            // Calculate analytics
+            $analytics = [
+                'overview' => [
+                    'total_vouchers' => $vouchers->count(),
+                    'active_vouchers' => $vouchers->where('status', 'active')->count(),
+                    'expired_vouchers' => $vouchers->where('status', 'expired')->count(),
+                    'used_vouchers' => $vouchers->where('status', 'used')->count(),
+                    'disabled_vouchers' => $vouchers->where('status', 'disabled')->count(),
+                    'total_revenue' => $vouchers->sum('price'),
+                    'average_price' => $vouchers->avg('price') ?? 0
+                ],
+                'profile_breakdown' => $vouchers->groupBy('profile')->map(function ($group, $profile) {
+                    return [
+                        'profile' => $profile,
+                        'count' => $group->count(),
+                        'revenue' => $group->sum('price'),
+                        'active' => $group->where('status', 'active')->count(),
+                        'expired' => $group->where('status', 'expired')->count()
+                    ];
+                })->values(),
+                'daily_generation' => $vouchers->groupBy(function ($voucher) {
+                    return $voucher->created_at->format('Y-m-d');
+                })->map(function ($group, $date) {
+                    return [
+                        'date' => $date,
+                        'count' => $group->count(),
+                        'revenue' => $group->sum('price')
+                    ];
+                })->values(),
+                'customer_insights' => [
+                    'vouchers_with_customers' => $vouchers->whereNotNull('customer_id')->count(),
+                    'vouchers_without_customers' => $vouchers->whereNull('customer_id')->count(),
+                    'top_customers' => $vouchers->whereNotNull('customer_id')
+                        ->groupBy('customer_id')
+                        ->map(function ($group) {
+                            $customer = $group->first()->customer;
+                            return [
+                                'customer_id' => $customer->id,
+                                'customer_name' => $customer->name,
+                                'voucher_count' => $group->count(),
+                                'total_spent' => $group->sum('price')
+                            ];
+                        })
+                        ->sortByDesc('voucher_count')
+                        ->take(10)
+                        ->values(),
+                ],
+                'usage_patterns' => [
+                    'average_validity_hours' => $vouchers->avg('validity_hours') ?? 0,
+                    'most_popular_validity' => $vouchers->groupBy('validity_hours')
+                        ->map->count()
+                        ->sortDesc()
+                        ->keys()
+                        ->first(),
+                    'data_limit_distribution' => $vouchers->whereNotNull('data_limit_mb')
+                        ->groupBy('data_limit_mb')
+                        ->map->count()
+                        ->sortDesc()
+                ],
+                'financial_metrics' => [
+                    'total_revenue' => $vouchers->sum('price'),
+                    'revenue_by_status' => $vouchers->groupBy('status')->map->sum('price'),
+                    'average_revenue_per_voucher' => $vouchers->avg('price') ?? 0,
+                    'refunded_amount' => $vouchers->filter(function ($voucher) {
+                        return isset($voucher->metadata['refund_info']['refunded']) && 
+                               $voucher->metadata['refund_info']['refunded'];
+                    })->sum(function ($voucher) {
+                        return $voucher->metadata['refund_info']['refund_amount'] ?? 0;
+                    })
+                ]
+            ];
+
+            return $analytics;
+
+        } catch (\Exception $e) {
+            Log::channel('voucher')->error('Failed to generate voucher analytics', [
+                'filters' => $filters,
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'error' => $e->getMessage(),
+                'overview' => [
+                    'total_vouchers' => 0,
+                    'active_vouchers' => 0,
+                    'expired_vouchers' => 0,
+                    'used_vouchers' => 0,
+                    'disabled_vouchers' => 0,
+                    'total_revenue' => 0,
+                    'average_price' => 0
+                ]
+            ];
+        }
+    }
+
+    /**
+     * Automatic voucher cleanup based on expiration policies
+     */
+    public function cleanupExpiredVouchers(array $policies = []): array
+    {
+        try {
+            $defaultPolicies = [
+                'auto_disable_after_days' => 30,
+                'delete_after_days' => 90,
+                'notify_before_cleanup' => true
+            ];
+
+            $policies = array_merge($defaultPolicies, $policies);
+            
+            $results = [
+                'disabled' => 0,
+                'deleted' => 0,
+                'notified' => 0,
+                'errors' => []
+            ];
+
+            // Find expired vouchers to disable
+            $expiredVouchers = VoucherModel::where('status', 'expired')
+                ->where('expires_at', '<', now()->subDays($policies['auto_disable_after_days']))
+                ->get();
+
+            foreach ($expiredVouchers as $voucher) {
+                try {
+                    $this->mikrotik->disableVoucher($voucher->code);
+                    $voucher->update(['status' => 'disabled']);
+                    $results['disabled']++;
+                } catch (\Exception $e) {
+                    $results['errors'][] = "Failed to disable voucher {$voucher->code}: " . $e->getMessage();
+                }
+            }
+
+            // Find old disabled vouchers to delete
+            if ($policies['delete_after_days'] > 0) {
+                $oldVouchers = VoucherModel::where('status', 'disabled')
+                    ->where('updated_at', '<', now()->subDays($policies['delete_after_days']))
+                    ->get();
+
+                foreach ($oldVouchers as $voucher) {
+                    try {
+                        $voucher->delete();
+                        $results['deleted']++;
+                    } catch (\Exception $e) {
+                        $results['errors'][] = "Failed to delete voucher {$voucher->code}: " . $e->getMessage();
+                    }
+                }
+            }
+
+            Log::channel('voucher')->info('Voucher cleanup completed', $results);
+
+            return $results;
+
+        } catch (\Exception $e) {
+            Log::channel('voucher')->error('Voucher cleanup failed', [
+                'policies' => $policies,
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'disabled' => 0,
+                'deleted' => 0,
+                'notified' => 0,
+                'errors' => [$e->getMessage()]
+            ];
+        }
+    }
+
+    /**
+     * Generate unique code with custom prefix
+     */
+    private function generateUniqueCodeWithPrefix(string $prefix): string
+    {
+        do {
+            // Format: PREFIX-XXXX-XXXX where X is alphanumeric
+            $code = strtoupper($prefix) . '-' . strtoupper(Str::random(4)) . '-' . strtoupper(Str::random(4));
+        } while (VoucherModel::where('code', $code)->exists());
+
+        return $code;
+    }
 }

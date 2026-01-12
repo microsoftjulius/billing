@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fc from 'fast-check'
-import api from '@/api/index'
+import api from '@/api/client'
 import { ApiResponse } from '@/types'
 
 // Mock axios for testing

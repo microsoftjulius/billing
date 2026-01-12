@@ -162,7 +162,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import api from '@/api/index'
+import api from '@/api/client'
 import type { Customer } from '@/types'
 
 // Props

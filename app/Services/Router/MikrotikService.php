@@ -20,41 +20,48 @@ class MikrotikService implements RouterManagerInterface
 
     public function __construct()
     {
-        $this->config = config('mikrotik');
-        $this->connect();
+        $this->config = config('mikrotik.default_connection', []);
+        if (!empty($this->config)) {
+            $this->connect();
+        }
     }
 
     private function connect(): void
     {
         try {
+            if (empty($this->config)) {
+                throw new \RuntimeException('MikroTik configuration not found');
+            }
+
             $this->client = new Client([
                 'host' => $this->config['host'],
                 'port' => $this->config['port'],
-                'user' => $this->config['user'],
+                'user' => $this->config['username'],
                 'pass' => $this->config['password'],
                 'ssl' => $this->config['ssl'] ?? false,
                 'timeout' => $this->config['timeout'] ?? 10,
-                'attempts' => $this->config['attempts'] ?? 3,
-                'delay' => $this->config['delay'] ?? 1,
+                'attempts' => 3,
+                'delay' => 1,
             ]);
 
             $this->isConnected = true;
 
             Log::channel('router')->info('MikroTik connected successfully', [
                 'host' => $this->config['host'],
-                'user' => $this->config['user']
+                'user' => $this->config['username']
             ]);
 
         } catch (\Exception $e) {
             $this->isConnected = false;
 
             Log::channel('router')->error('MikroTik connection failed', [
-                'host' => $this->config['host'],
+                'host' => $this->config['host'] ?? 'unknown',
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
 
-            throw new \RuntimeException('Failed to connect to MikroTik router: ' . $e->getMessage());
+            // Don't throw exception in constructor to allow service to be created
+            // throw new \RuntimeException('Failed to connect to MikroTik router: ' . $e->getMessage());
         }
     }
 

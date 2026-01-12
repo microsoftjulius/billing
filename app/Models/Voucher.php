@@ -29,7 +29,8 @@ class Voucher extends BaseModel
         'sms_sent_at',
         'router_metadata',
         'usage_stats',
-        'metadata'
+        'metadata',
+        'tenant_id'
     ];
 
     protected $casts = [
@@ -145,6 +146,15 @@ class Voucher extends BaseModel
         }
 
         return $diff->i . ' minutes';
+    }
+
+    public function getRemainingHoursAttribute(): ?int
+    {
+        if (!$this->expires_at) {
+            return null;
+        }
+
+        return max(0, now()->diffInHours($this->expires_at, false));
     }
 
     public function getFormattedPriceAttribute(): string

@@ -16,6 +16,18 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresGuest: true }
     },
     {
+        path: '/signup',
+        name: 'signup',
+        component: () => import('@/pages/SignupPage.vue'),
+        meta: { requiresGuest: true }
+    },
+    {
+        path: '/auth-debug',
+        name: 'auth-debug-public',
+        component: () => import('@/components/AuthDebug.vue'),
+        meta: { title: 'Auth Debug' }
+    },
+    {
         path: '/app',
         component: () => import('@/layouts/DashboardLayout.vue'),
         meta: { requiresAuth: true },
@@ -34,9 +46,27 @@ const routes: RouteRecordRaw[] = [
                 }
             },
             {
+                path: 'debug',
+                name: 'debug',
+                component: () => import('@/components/DashboardDebug.vue'),
+                meta: { 
+                    title: 'Debug Dashboard',
+                    breadcrumb: ['Dashboard', 'Debug']
+                }
+            },
+            {
+                path: 'auth-debug',
+                name: 'auth-debug',
+                component: () => import('@/components/AuthDebug.vue'),
+                meta: { 
+                    title: 'Auth Debug',
+                    breadcrumb: ['Dashboard', 'Auth Debug']
+                }
+            },
+            {
                 path: 'customers',
                 name: 'customers',
-                component: () => import('@/components/CustomersPlaceholder.vue'),
+                component: () => import('@/components/CustomerManagement.vue'),
                 meta: { 
                     title: 'Customer Management',
                     breadcrumb: ['Dashboard', 'Customers']
@@ -45,7 +75,7 @@ const routes: RouteRecordRaw[] = [
             {
                 path: 'vouchers',
                 name: 'vouchers',
-                component: () => import('@/components/VouchersPlaceholder.vue'),
+                component: () => import('@/components/VoucherManagement.vue'),
                 meta: { 
                     title: 'Voucher Management',
                     breadcrumb: ['Dashboard', 'Vouchers']
@@ -54,7 +84,7 @@ const routes: RouteRecordRaw[] = [
             {
                 path: 'payments',
                 name: 'payments',
-                component: () => import('@/components/PaymentsPlaceholder.vue'),
+                component: () => import('@/components/PaymentAnalytics.vue'),
                 meta: { 
                     title: 'Payment Management',
                     breadcrumb: ['Dashboard', 'Payments']
@@ -103,6 +133,24 @@ const routes: RouteRecordRaw[] = [
                 meta: { 
                     title: 'SMS Configuration',
                     breadcrumb: ['Dashboard', 'SMS']
+                }
+            },
+            {
+                path: 'reports',
+                name: 'reports',
+                component: () => import('@/components/ReportsPlaceholder.vue'),
+                meta: { 
+                    title: 'Reports',
+                    breadcrumb: ['Dashboard', 'Reports']
+                }
+            },
+            {
+                path: 'api-keys',
+                name: 'api-keys',
+                component: () => import('@/components/ApiKeyManagement.vue'),
+                meta: { 
+                    title: 'API Keys',
+                    breadcrumb: ['Dashboard', 'API Keys']
                 }
             },
             {
@@ -170,22 +218,6 @@ router.beforeEach((to, from, next) => {
         if (!appStore.isInitialized) {
             console.log('Initializing app store...')
             appStore.initializeApp()
-        }
-        
-        // For development: create a demo user if none exists
-        if (import.meta.env.DEV && !appStore.user) {
-            console.log('Creating demo user for development...')
-            const demoUser = {
-                id: 'demo-user-1',
-                name: 'Demo User',
-                email: 'admin@billing.com',
-                role: 'admin' as const,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-            }
-            appStore.setUser(demoUser)
-            localStorage.setItem('auth_token', 'demo-token-123')
-            localStorage.setItem('user', JSON.stringify(demoUser))
         }
         
         const isAuthenticated = appStore.isAuthenticated

@@ -4,7 +4,10 @@
       <div class="login-card">
         <div class="login-header">
           <div class="logo">
-            <h1>BillingSystem</h1>
+            <svg viewBox="0 0 24 24" fill="currentColor" class="logo-icon">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+            </svg>
+            <h1>NetBill Pro</h1>
           </div>
           <h2>Welcome Back</h2>
           <p>Sign in to access your billing dashboard</p>
@@ -13,8 +16,18 @@
         <!-- Demo Credentials Notice -->
         <div class="demo-notice">
           <h4>Demo Credentials</h4>
-          <p><strong>Email:</strong> admin@billing.com</p>
-          <p><strong>Password:</strong> password123</p>
+          <div class="credentials-options">
+            <div class="credential-option">
+              <p><strong>Global Admin:</strong></p>
+              <p>Email: admin@gmail.com</p>
+              <p>Password: 12345678</p>
+            </div>
+            <div class="credential-option">
+              <p><strong>System Admin:</strong></p>
+              <p>Email: admin@billing.com</p>
+              <p>Password: password123</p>
+            </div>
+          </div>
         </div>
         
         <form @submit.prevent="handleLogin" class="login-form">
@@ -71,9 +84,22 @@
             :disabled="isLoading"
             class="demo-btn"
           >
-            Use Demo Credentials
+            Use Global Admin (Recommended)
+          </button>
+          
+          <button 
+            type="button" 
+            @click="loginWithSystemAdmin"
+            :disabled="isLoading"
+            class="demo-btn secondary"
+          >
+            Use System Admin
           </button>
         </form>
+        
+        <div class="login-footer">
+          <p>Don't have an account? <router-link to="/signup" class="link">Sign up for free</router-link></p>
+        </div>
         
         <div v-if="error" class="error-message">
           <svg viewBox="0 0 24 24" fill="currentColor">
@@ -90,6 +116,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAppStore } from '@/store/modules/app';
+import type { User } from '@/types';
 
 const router = useRouter();
 const appStore = useAppStore();
@@ -104,6 +131,12 @@ const isLoading = ref(false);
 const error = ref('');
 
 const loginWithDemo = () => {
+  form.value.email = 'admin@gmail.com';
+  form.value.password = '12345678';
+  handleLogin();
+};
+
+const loginWithSystemAdmin = () => {
   form.value.email = 'admin@billing.com';
   form.value.password = 'password123';
   handleLogin();
@@ -114,38 +147,104 @@ const handleLogin = async () => {
     isLoading.value = true;
     error.value = '';
     
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Determine tenant context from subdomain
+    const hostname = window.location.hostname;
+    const isSubdomain = hostname.includes('.netbillpro.com') && !hostname.startsWith('www.');
+    let tenantSlug = null;
     
-    // Demo login - accept any credentials for now
-    if (form.value.email && form.value.password) {
-      // Create a demo user
-      const demoUser = {
-        id: 1,
-        name: 'Demo Admin',
-        email: form.value.email,
-        role: 'admin',
-        avatar: null,
-        token: 'demo-token-' + Date.now()
-      };
-      
-      // Set user in store
-      appStore.setUser(demoUser);
-      
-      // Store token in localStorage
-      localStorage.setItem('auth_token', demoUser.token);
-      localStorage.setItem('user', JSON.stringify(demoUser));
-      
-      // Redirect to dashboard
-      router.push('/app/dashboard');
-      
-      appStore.addSuccessNotification(
-        `Welcome back, ${demoUser.name}!`,
-        'Login Successful'
-      );
-    } else {
-      throw new Error('Please enter both email and password');
+    if (isSubdomain) {
+      tenantSlug = hostname.split('.')[0];
     }
+    
+    // Prepare login data
+    const loginData = {
+      email: form.value.email,
+      password: form.value.password,
+      tenant_slug: tenantSlug,
+      remember_me: rememberMe.value
+    };
+    
+    // Make API call to login endpoint
+    const response = await fetch('/api/v1/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        ...(tenantSlug && { 'X-Tenant-Slug': tenantSlug })
+      },
+      body: JSON.stringify(loginData)
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.message || 'Login failed');
+    }
+    
+    if (!data.success) {
+      throw new Error(data.message || 'Login failed');
+    }
+    
+    // Extract user and tenant data from response
+    const { user, tenant, token } = data.data;
+    
+    // Set user in store
+    appStore.setUser({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      token: token,
+      tenantId: tenant?.id || null,
+      plan: tenant?.plan || null,
+      created_at: user.created_at,
+      updated_at: user.updated_at
+    });
+    
+    // Set tenant in store if available
+    if (tenant) {
+      appStore.setTenant({
+        id: tenant.id,
+        name: tenant.name,
+        subdomain: tenant.slug,
+        plan: tenant.plan,
+        planName: tenant.plan.charAt(0).toUpperCase() + tenant.plan.slice(1),
+        planPrice: getPlanPrice(tenant.plan),
+        planFeatures: getPlanFeatures(tenant.plan),
+        owner: {
+          firstName: user.name.split(' ')[0],
+          lastName: user.name.split(' ').slice(1).join(' '),
+          email: user.email
+        },
+        settings: tenant.metadata?.features || {},
+        created_at: tenant.created_at
+      });
+    }
+    
+    // Store token and user data
+    localStorage.setItem('auth_token', token);
+    localStorage.setItem('user', JSON.stringify(user));
+    if (tenant) {
+      localStorage.setItem('tenant', JSON.stringify(tenant));
+    }
+    
+    // Set axios default authorization header
+    if (typeof window !== 'undefined' && (window as any).axios) {
+      (window as any).axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    }
+    
+    // Redirect to dashboard
+    router.push('/app/dashboard');
+    
+    const welcomeMessage = tenant 
+      ? `Welcome back to ${tenant.name}!`
+      : `Welcome back, ${user.name}!`;
+      
+    appStore.addSuccessNotification(
+      welcomeMessage,
+      'Login Successful'
+    );
+    
   } catch (err: any) {
     error.value = err.message || 'Login failed. Please try again.';
     
@@ -158,9 +257,54 @@ const handleLogin = async () => {
   }
 };
 
+// Helper functions for plan data
+const getPlanPrice = (plan: string) => {
+  switch (plan) {
+    case 'starter': return 15;
+    case 'professional': return 65;
+    case 'enterprise': return 199;
+    default: return 0;
+  }
+};
+
+const getPlanFeatures = (plan: string) => {
+  const features = {
+    starter: [
+      'Up to 100 customers',
+      '2 MikroTik routers',
+      'Basic SMS notifications',
+      'Single payment gateway',
+      'Basic analytics',
+      'Email support'
+    ],
+    professional: [
+      'Up to 1,000 customers',
+      'Unlimited MikroTik routers',
+      'Advanced SMS automation',
+      'Multiple payment gateways',
+      'Advanced analytics & reports',
+      'API access',
+      'Priority support',
+      'Custom branding'
+    ],
+    enterprise: [
+      'Unlimited customers',
+      'Unlimited routers',
+      'White-label solution',
+      'Custom integrations',
+      'Advanced security features',
+      'Dedicated account manager',
+      '24/7 phone support',
+      'SLA guarantee'
+    ]
+  };
+  
+  return features[plan] || features.starter;
+};
+
 // Auto-fill demo credentials on component mount
-form.value.email = 'admin@billing.com';
-form.value.password = 'password123';
+form.value.email = 'admin@gmail.com';
+form.value.password = '12345678';
 </script>
 
 <style scoped>
@@ -213,6 +357,19 @@ form.value.password = 'password123';
   margin: 0 0 1rem 0;
 }
 
+.logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.logo-icon {
+  width: 32px;
+  height: 32px;
+  color: var(--primary-color);
+}
+
 .login-header h2 {
   font-size: 1.5rem;
   font-weight: 700;
@@ -236,16 +393,36 @@ form.value.password = 'password123';
 }
 
 .demo-notice h4 {
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 0.75rem 0;
   font-size: 0.875rem;
   font-weight: 600;
   opacity: 0.9;
 }
 
-.demo-notice p {
+.credentials-options {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.credential-option {
+  flex: 1;
+  padding: 0.5rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.credential-option p {
   margin: 0.25rem 0;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-family: 'Courier New', monospace;
+}
+
+.credential-option p:first-child {
+  font-weight: 600;
+  font-family: inherit;
+  margin-bottom: 0.5rem;
 }
 
 .login-form {
@@ -363,6 +540,40 @@ form.value.password = 'password123';
   border-color: var(--primary-color);
   color: var(--primary-color);
   background: rgba(59, 130, 246, 0.05);
+}
+
+.demo-btn.secondary {
+  border-color: var(--text-secondary);
+  color: var(--text-secondary);
+}
+
+.demo-btn.secondary:hover:not(:disabled) {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.login-footer {
+  text-align: center;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.login-footer p {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.link {
+  color: var(--primary-color);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.link:hover {
+  text-decoration: underline;
 }
 
 .spinner {

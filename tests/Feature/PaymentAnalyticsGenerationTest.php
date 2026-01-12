@@ -51,12 +51,16 @@ class PaymentAnalyticsGenerationTest extends TestCase
             $amount = rand(1000, 100000);
             $status = ['completed', 'pending', 'failed'][rand(0, 2)];
             
+            // Create payments within the current month to match the 'month' filter
+            $daysInMonth = now()->daysInMonth;
+            $randomDay = rand(1, min($daysInMonth, now()->day)); // Don't go beyond today
+            
             Payment::factory()->create([
                 'customer_id' => $customers->random()->id,
                 'amount' => $amount,
                 'status' => $status,
                 'currency' => 'UGX',
-                'created_at' => now()->subDays(rand(0, 30))
+                'created_at' => now()->startOfMonth()->addDays($randomDay - 1)
             ]);
             
             $totalAmount += $amount;
@@ -131,13 +135,13 @@ class PaymentAnalyticsGenerationTest extends TestCase
         $oldPayment = Payment::factory()->create([
             'amount' => 10000,
             'status' => 'completed',
-            'created_at' => now()->subDays(45)
+            'created_at' => now()->subDays(45) // This should be outside current month
         ]);
         
         $recentPayment = Payment::factory()->create([
             'amount' => 20000,
             'status' => 'completed',
-            'created_at' => now()->subDays(15)
+            'created_at' => now()->startOfMonth()->addDays(5) // This should be within current month
         ]);
         
         $todayPayment = Payment::factory()->create([

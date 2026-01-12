@@ -404,7 +404,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useAppStore } from '@/store/modules/app'
 import Modal from '@/components/common/Modal.vue'
 import LazyDataTable from '@/components/common/LazyDataTable.vue'
-import api from '@/api'
+import api from '@/api/client'
 
 // Store
 const appStore = useAppStore()

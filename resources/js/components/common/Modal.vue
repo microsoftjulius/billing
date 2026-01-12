@@ -1,72 +1,77 @@
 <template>
-    <transition name="modal-fade">
-        <div v-if="show" class="modal-backdrop" @click.self="handleBackdropClick">
-            <div
-                class="modal-container"
-                :class="[size, variant, { 'no-footer': !showFooter }]"
-                role="dialog"
-                aria-modal="true"
-                :aria-labelledby="titleId"
-            >
-                <div class="modal-header" :class="{ 'no-title': !title }">
-                    <div v-if="title || $slots.title" class="modal-title-section">
-                        <slot name="title">
-                            <h3 :id="titleId" class="modal-title">{{ title }}</h3>
-                            <span v-if="subtitle" class="modal-subtitle">{{ subtitle }}</span>
+    <teleport to="body">
+        <transition name="modal-fade">
+            <div v-if="show" class="modal-backdrop" @click.self="handleBackdropClick">
+                <div
+                    class="modal-container"
+                    :class="[size, variant, { 'no-footer': !showFooter }, { 'scrollable': scrollable }]"
+                    role="dialog"
+                    aria-modal="true"
+                    :aria-labelledby="titleId"
+                    :aria-describedby="descriptionId"
+                >
+                    <div class="modal-header" :class="{ 'no-title': !title && !$slots.title }">
+                        <div v-if="title || $slots.title" class="modal-title-section">
+                            <slot name="title">
+                                <h3 :id="titleId" class="modal-title">{{ title }}</h3>
+                                <span v-if="subtitle" class="modal-subtitle">{{ subtitle }}</span>
+                            </slot>
+                        </div>
+
+                        <div class="modal-header-actions">
+                            <slot name="header-actions"></slot>
+
+                            <button
+                                v-if="closable"
+                                class="modal-close-btn"
+                                @click="close"
+                                aria-label="Close modal"
+                                type="button"
+                            >
+                                <svg class="close-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="modal-content" :id="descriptionId">
+                        <slot></slot>
+                    </div>
+
+                    <div v-if="showFooter || $slots.footer" class="modal-footer">
+                        <slot name="footer">
+                            <div class="default-footer">
+                                <button
+                                    v-if="cancelText"
+                                    class="btn"
+                                    :class="cancelButtonClass"
+                                    @click="handleCancel"
+                                    :disabled="loading"
+                                >
+                                    {{ cancelText }}
+                                </button>
+                                <button
+                                    v-if="confirmText"
+                                    class="btn"
+                                    :class="confirmButtonClass"
+                                    @click="handleConfirm"
+                                    :disabled="loading || !canConfirm"
+                                >
+                                    <span v-if="loading" class="loading-spinner-sm"></span>
+                                    {{ confirmText }}
+                                </button>
+                            </div>
                         </slot>
                     </div>
 
-                    <div class="modal-header-actions">
-                        <slot name="header-actions"></slot>
-
-                        <button
-                            v-if="closable"
-                            class="modal-close-btn"
-                            @click="close"
-                            aria-label="Close modal"
-                            type="button"
-                        >
-                            <svg class="close-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
+                    <div v-if="loading" class="modal-loading-overlay">
+                        <div class="loading-spinner"></div>
                     </div>
                 </div>
-
-                <div class="modal-content">
-                    <slot></slot>
-                </div>
-
-                <div v-if="showFooter" class="modal-footer">
-                    <slot name="footer">
-                        <div class="default-footer">
-                            <button
-                                v-if="cancelText"
-                                class="btn btn-secondary"
-                                @click="handleCancel"
-                                :disabled="loading"
-                            >
-                                {{ cancelText }}
-                            </button>
-                            <button
-                                v-if="confirmText"
-                                class="btn btn-primary"
-                                @click="handleConfirm"
-                                :disabled="loading"
-                                :loading="loading"
-                            >
-                                {{ confirmText }}
-                            </button>
-                        </div>
-                    </slot>
-                </div>
-
-                <div v-if="loading" class="modal-loading-overlay">
-                    <div class="loading-spinner"></div>
-                </div>
             </div>
-        </div>
-    </transition>
+        </transition>
+    </teleport>
 </template>
 
 <script>
@@ -113,11 +118,21 @@ export default {
         },
         confirmText: {
             type: String,
-            default: 'Confirm'
+            default: ''
         },
         cancelText: {
             type: String,
-            default: 'Cancel'
+            default: ''
+        },
+        confirmButtonVariant: {
+            type: String,
+            default: 'primary',
+            validator: (value) => ['primary', 'secondary', 'danger', 'warning', 'success', 'info'].includes(value)
+        },
+        cancelButtonVariant: {
+            type: String,
+            default: 'secondary',
+            validator: (value) => ['primary', 'secondary', 'danger', 'warning', 'success', 'info'].includes(value)
         },
         showFooter: {
             type: Boolean,
@@ -126,16 +141,33 @@ export default {
         preventClose: {
             type: Boolean,
             default: false
+        },
+        scrollable: {
+            type: Boolean,
+            default: true
+        },
+        canConfirm: {
+            type: Boolean,
+            default: true
+        },
+        persistent: {
+            type: Boolean,
+            default: false
         }
     },
     data() {
         return {
-            titleId: `modal-title-${Math.random().toString(36).substr(2, 9)}`
+            titleId: `modal-title-${Math.random().toString(36).substr(2, 9)}`,
+            descriptionId: `modal-description-${Math.random().toString(36).substr(2, 9)}`
         }
     },
     computed: {
-        showFooterSlot() {
-            return this.$slots.footer || (this.confirmText && this.cancelText)
+        confirmButtonClass() {
+            return `btn-${this.confirmButtonVariant}`
+        },
+        
+        cancelButtonClass() {
+            return `btn-${this.cancelButtonVariant}`
         }
     },
     watch: {
@@ -143,15 +175,17 @@ export default {
             if (newVal) {
                 this.$emit('open')
                 this.addEventListeners()
+                this.lockBodyScroll()
             } else {
                 this.removeEventListeners()
+                this.unlockBodyScroll()
                 this.$emit('close')
             }
         }
     },
     methods: {
         close() {
-            if (!this.preventClose) {
+            if (!this.preventClose && !this.persistent) {
                 this.$emit('update:show', false)
                 this.$emit('closed')
             }
@@ -163,17 +197,19 @@ export default {
 
         handleCancel() {
             this.$emit('cancel')
-            this.close()
+            if (!this.persistent) {
+                this.close()
+            }
         },
 
         handleBackdropClick() {
-            if (this.closeOnBackdrop && !this.preventClose) {
+            if (this.closeOnBackdrop && !this.preventClose && !this.persistent) {
                 this.close()
             }
         },
 
         handleEsc(e) {
-            if (e.key === 'Escape' && this.closeOnEsc && !this.preventClose) {
+            if (e.key === 'Escape' && this.closeOnEsc && !this.preventClose && !this.persistent) {
                 this.close()
             }
         },
@@ -182,23 +218,42 @@ export default {
             if (this.closeOnEsc) {
                 document.addEventListener('keydown', this.handleEsc)
             }
-            document.body.style.overflow = 'hidden'
         },
 
         removeEventListeners() {
             if (this.closeOnEsc) {
                 document.removeEventListener('keydown', this.handleEsc)
             }
+        },
+
+        lockBodyScroll() {
+            document.body.style.overflow = 'hidden'
+            document.body.style.paddingRight = this.getScrollbarWidth() + 'px'
+        },
+
+        unlockBodyScroll() {
             document.body.style.overflow = ''
+            document.body.style.paddingRight = ''
+        },
+
+        getScrollbarWidth() {
+            const scrollDiv = document.createElement('div')
+            scrollDiv.style.cssText = 'width: 100px; height: 100px; overflow: scroll; position: absolute; top: -9999px;'
+            document.body.appendChild(scrollDiv)
+            const scrollbarWidth = scrollDiv.offsetWidth - scrollDiv.clientWidth
+            document.body.removeChild(scrollDiv)
+            return scrollbarWidth
         }
     },
     mounted() {
         if (this.show) {
             this.addEventListeners()
+            this.lockBodyScroll()
         }
     },
-    beforeDestroy() {
+    beforeUnmount() {
         this.removeEventListeners()
+        this.unlockBodyScroll()
     }
 }
 </script>
@@ -229,6 +284,10 @@ export default {
     animation: slideUp 0.3s ease;
     position: relative;
     overflow: hidden;
+}
+
+.modal-container.scrollable .modal-content {
+    overflow-y: auto;
 }
 
 /* Size variants */
@@ -265,6 +324,7 @@ export default {
     background: #f9fafb;
     min-height: 68px;
     box-sizing: border-box;
+    flex-shrink: 0;
 }
 
 .modal-header.no-title {
@@ -331,7 +391,6 @@ export default {
 
 .modal-content {
     padding: 24px;
-    overflow-y: auto;
     flex: 1;
     min-height: 0;
 }
@@ -347,6 +406,7 @@ export default {
     display: flex;
     justify-content: flex-end;
     gap: 12px;
+    flex-shrink: 0;
 }
 
 .default-footer {
@@ -369,20 +429,12 @@ export default {
     align-items: center;
     justify-content: center;
     gap: 6px;
+    text-decoration: none;
 }
 
 .btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
-}
-
-.btn-secondary {
-    background: #6b7280;
-    color: white;
-}
-
-.btn-secondary:hover:not(:disabled) {
-    background: #4b5563;
 }
 
 .btn-primary {
@@ -394,14 +446,59 @@ export default {
     background: #2563eb;
 }
 
-.btn-primary[loading]::after {
-    content: '';
+.btn-secondary {
+    background: #6b7280;
+    color: white;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: #4b5563;
+}
+
+.btn-danger {
+    background: #ef4444;
+    color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: #dc2626;
+}
+
+.btn-warning {
+    background: #f59e0b;
+    color: white;
+}
+
+.btn-warning:hover:not(:disabled) {
+    background: #d97706;
+}
+
+.btn-success {
+    background: #10b981;
+    color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+    background: #059669;
+}
+
+.btn-info {
+    background: #3b82f6;
+    color: white;
+}
+
+.btn-info:hover:not(:disabled) {
+    background: #2563eb;
+}
+
+.loading-spinner-sm {
     width: 14px;
     height: 14px;
     border: 2px solid rgba(255, 255, 255, 0.3);
     border-radius: 50%;
     border-top-color: white;
     animation: spin 1s linear infinite;
+    margin-right: 6px;
 }
 
 .modal-loading-overlay {
@@ -453,9 +550,40 @@ export default {
     transition: opacity 0.3s ease;
 }
 
-.modal-fade-enter,
+.modal-fade-enter-from,
 .modal-fade-leave-to {
     opacity: 0;
+}
+
+/* Dark theme support */
+@media (prefers-color-scheme: dark) {
+    .modal-container {
+        background: #1f2937;
+        color: #f9fafb;
+    }
+
+    .modal-header,
+    .modal-footer {
+        background: #111827;
+        border-color: #374151;
+    }
+
+    .modal-title {
+        color: #f9fafb;
+    }
+
+    .modal-subtitle {
+        color: #9ca3af;
+    }
+
+    .modal-close-btn {
+        color: #9ca3af;
+    }
+
+    .modal-close-btn:hover {
+        background: #374151;
+        color: #f3f4f6;
+    }
 }
 
 /* Responsive */

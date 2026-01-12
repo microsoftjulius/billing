@@ -125,41 +125,25 @@ class TenancyServiceProvider extends ServiceProvider
     protected function registerTenancyEvents(): void
     {
         Event::listen(TenantCreated::class, function (TenantCreated $event) {
-
-            // Create tenant database/schema
-            $event->tenant->createDatabase();
-
-            // Run tenant migrations
-            $event->tenant->run(function () {
-                \Artisan::call('migrate', [
-                    '--path' => 'database/migrations/tenant',
-                    '--force' => true,
-                ]);
-            });
-
-            // Seed tenant database
-            $event->tenant->run(function () {
-                \Artisan::call('db:seed', [
-                    '--class' => 'TenantDatabaseSeeder',
-                    '--force' => true,
-                ]);
-            });
-
-            \Log::channel('tenancy')->info('Tenant created', [
+            // Note: Using single database approach with tenant_id column
+            // No need to create separate databases for each tenant
+            
+            // Log tenant creation
+            \Log::info('Tenant created', [
                 'tenant_id' => $event->tenant->id,
-                'name' => $event->tenant->name,
-                'domain' => optional($event->tenant->domains->first())->domain,
+                'tenant_name' => $event->tenant->name,
+                'tenant_slug' => $event->tenant->slug,
             ]);
+
+            // Seed tenant-specific data if needed
+            // This could be done here or handled separately
         });
 
         Event::listen(TenantDeleted::class, function (TenantDeleted $event) {
-
-            // Drop tenant database/schema
-            $event->tenant->deleteDatabase();
-
-            \Log::channel('tenancy')->info('Tenant deleted', [
+            // Log tenant deletion
+            \Log::info('Tenant deleted', [
                 'tenant_id' => $event->tenant->id,
-                'name' => $event->tenant->name,
+                'tenant_name' => $event->tenant->name,
             ]);
         });
     }

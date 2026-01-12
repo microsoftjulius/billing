@@ -16,20 +16,23 @@ const api: AxiosInstance = axios.create({
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
-    // Add CSRF token if available
-    const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-    if (token) {
-      config.headers['X-CSRF-TOKEN'] = token;
-    }
-
     // Add auth token if available
     const authToken = localStorage.getItem('auth_token');
     if (authToken) {
       config.headers.Authorization = `Bearer ${authToken}`;
     }
 
-    // Add request metadata for error tracking
-    config.metadata = {
+    // Add CSRF token only for non-API routes or if specifically needed
+    // For API routes with Bearer token, CSRF is typically not required
+    if (!config.url?.startsWith('/api/v1/') || !authToken) {
+      const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+      if (token) {
+        config.headers['X-CSRF-TOKEN'] = token;
+      }
+    }
+
+    // Add request metadata for error tracking (using any to avoid TypeScript issues)
+    (config as any).metadata = {
       startTime: Date.now(),
       url: config.url,
       method: config.method?.toUpperCase()
@@ -53,7 +56,7 @@ api.interceptors.response.use(
   (response: AxiosResponse<ApiResponse>) => {
     // Log successful requests in development
     if (import.meta.env.DEV) {
-      const duration = Date.now() - response.config.metadata?.startTime;
+      const duration = Date.now() - (response.config as any).metadata?.startTime;
       console.log(`API Success: ${response.config.method?.toUpperCase()} ${response.config.url} (${duration}ms)`);
     }
     return response;
@@ -66,8 +69,8 @@ api.interceptors.response.use(
         action: error.config?.method?.toUpperCase() || 'unknown',
         additionalData: {
           url: error.config?.url,
-          duration: error.config?.metadata?.startTime 
-            ? Date.now() - error.config.metadata.startTime 
+          duration: (error.config as any)?.metadata?.startTime 
+            ? Date.now() - (error.config as any).metadata.startTime 
             : undefined
         }
       }
@@ -77,4 +80,5 @@ api.interceptors.response.use(
   }
 );
 
+export { api };
 export default api;

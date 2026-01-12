@@ -1,396 +1,159 @@
 <template>
   <div class="dashboard">
-    <!-- Loading Overlay -->
-    <LoadingOverlay v-if="isInitialLoading" />
+    <div class="dashboard-header">
+      <h1>Dashboard</h1>
+      <p>Welcome back! Here's what's happening with your billing system.</p>
+    </div>
 
-    <!-- Dashboard Content -->
-    <div v-else class="dashboard-content">
-      <!-- Key Metrics Cards -->
-      <div class="metrics-grid">
-        <MetricCard
-          title="Today's Revenue"
-          :value="formatCurrency(stats.revenue?.today || 0)"
-          :change="stats.revenue?.growth_percentage"
-          icon="fas fa-money-bill-wave"
-          color="green"
-          :loading="isLoading"
-        />
-        
-        <MetricCard
-          title="Active Customers"
-          :value="stats.customers?.active || 0"
-          :change="stats.customers?.active_percentage"
-          :subtitle="`${stats.customers?.total || 0} total`"
-          icon="fas fa-users"
-          color="blue"
-          :loading="isLoading"
-        />
-        
-        <MetricCard
-          title="Active Vouchers"
-          :value="stats.vouchers?.active || 0"
-          :change="stats.vouchers?.utilization_rate"
-          :subtitle="`${stats.vouchers?.total || 0} total`"
-          icon="fas fa-ticket-alt"
-          color="purple"
-          :loading="isLoading"
-        />
-        
-        <MetricCard
-          title="MikroTik Devices"
-          :value="`${stats.mikrotik?.online || 0}/${stats.mikrotik?.total_devices || 0}`"
-          :change="stats.mikrotik?.uptime_percentage"
-          subtitle="Online/Total"
-          icon="fas fa-router"
-          color="orange"
-          :loading="isLoading"
-        />
-      </div>
-
-      <!-- Charts and Analytics -->
-      <div class="analytics-section">
-        <div class="analytics-grid">
-          <!-- Revenue Chart -->
-          <div class="chart-card">
-            <div class="chart-header">
-              <h3>Revenue Analytics</h3>
-              <div class="chart-controls">
-                <select v-model="revenueChartPeriod" @change="updateRevenueChart">
-                  <option value="30d">Last 30 Days</option>
-                  <option value="7d">Last 7 Days</option>
-                  <option value="90d">Last 90 Days</option>
-                </select>
-              </div>
-            </div>
-            <div class="chart-container">
-              <canvas ref="revenueChart" id="revenueChart"></canvas>
-            </div>
-          </div>
-
-          <!-- Device Status Map -->
-          <div class="chart-card">
-            <div class="chart-header">
-              <h3>MikroTik Device Status</h3>
-              <div class="device-legend">
-                <span class="legend-item">
-                  <span class="legend-dot online"></span>
-                  Online ({{ stats.mikrotik?.online || 0 }})
-                </span>
-                <span class="legend-item">
-                  <span class="legend-dot offline"></span>
-                  Offline ({{ stats.mikrotik?.offline || 0 }})
-                </span>
-              </div>
-            </div>
-            <div class="device-map">
-              <MikroTikMonitor 
-                :show-header="false" 
-                :compact="true"
-                @device-status-change="handleDeviceStatusChange"
-              />
-            </div>
-          </div>
+    <!-- Key Metrics Cards -->
+    <div class="metrics-grid" v-if="dashboardData">
+      <div class="metric-card">
+        <div class="metric-icon revenue">
+          <i class="fas fa-money-bill-wave"></i>
+        </div>
+        <div class="metric-content">
+          <div class="metric-value">{{ formatCurrency(dashboardData.overview.total_revenue) }}</div>
+          <div class="metric-title">Total Revenue</div>
+          <div class="metric-subtitle">Across all tenants</div>
         </div>
       </div>
 
-      <!-- Recent Activity and System Health -->
-      <div class="bottom-section">
-        <div class="bottom-grid">
-          <!-- Recent Transactions -->
-          <div class="activity-card">
-            <div class="card-header">
-              <h3>Recent Transactions</h3>
-              <router-link to="/app/payments" class="view-all-link">
-                View All
-              </router-link>
-            </div>
-            <div class="activity-list">
-              <div 
-                v-for="payment in recentPayments" 
-                :key="payment.id"
-                class="activity-item"
-              >
-                <div class="activity-icon payment">
-                  <i class="fas fa-credit-card"></i>
-                </div>
-                <div class="activity-content">
-                  <div class="activity-title">
-                    {{ formatCurrency(payment.amount) }} from {{ payment.customer.name }}
-                  </div>
-                  <div class="activity-subtitle">
-                    {{ formatTime(payment.created_at) }}
-                    <span 
-                      class="status-badge" 
-                      :class="payment.status"
-                    >
-                      {{ payment.status }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div v-if="recentPayments.length === 0" class="no-data">
-                No recent transactions
-              </div>
-            </div>
-          </div>
-
-          <!-- Recent Vouchers -->
-          <div class="activity-card">
-            <div class="card-header">
-              <h3>Recent Vouchers</h3>
-              <router-link to="/app/vouchers" class="view-all-link">
-                View All
-              </router-link>
-            </div>
-            <div class="activity-list">
-              <div 
-                v-for="voucher in recentVouchers" 
-                :key="voucher.id"
-                class="activity-item"
-              >
-                <div class="activity-icon voucher">
-                  <i class="fas fa-ticket-alt"></i>
-                </div>
-                <div class="activity-content">
-                  <div class="activity-title">
-                    {{ voucher.code }} ({{ voucher.duration_hours }}h)
-                  </div>
-                  <div class="activity-subtitle">
-                    {{ formatTime(voucher.created_at) }}
-                    <span 
-                      class="status-badge" 
-                      :class="voucher.status"
-                    >
-                      {{ voucher.status }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div v-if="recentVouchers.length === 0" class="no-data">
-                No recent vouchers
-              </div>
-            </div>
-          </div>
-
-          <!-- System Health -->
-          <div class="health-card">
-            <div class="card-header">
-              <h3>System Health</h3>
-              <div 
-                class="health-status" 
-                :class="stats.system_health?.overall_status || 'unknown'"
-              >
-                <i class="fas fa-circle"></i>
-                {{ (stats.system_health?.overall_status || 'unknown').toUpperCase() }}
-              </div>
-            </div>
-            <div class="health-checks">
-              <div 
-                v-for="(check, name) in stats.system_health?.checks || {}" 
-                :key="name"
-                class="health-check"
-                :class="check.status"
-              >
-                <div class="check-icon">
-                  <i 
-                    class="fas" 
-                    :class="{
-                      'fa-check-circle': check.status === 'healthy',
-                      'fa-exclamation-triangle': check.status === 'warning',
-                      'fa-times-circle': check.status === 'unhealthy' || check.status === 'critical'
-                    }"
-                  ></i>
-                </div>
-                <div class="check-content">
-                  <div class="check-name">{{ formatCheckName(name) }}</div>
-                  <div class="check-message">{{ check.message }}</div>
-                </div>
-              </div>
-            </div>
-          </div>
+      <div class="metric-card">
+        <div class="metric-icon customers">
+          <i class="fas fa-users"></i>
+        </div>
+        <div class="metric-content">
+          <div class="metric-value">{{ dashboardData.overview.total_customers }}</div>
+          <div class="metric-title">Total Customers</div>
+          <div class="metric-subtitle">{{ dashboardData.overview.active_tenants }} active tenants</div>
         </div>
       </div>
 
-      <!-- Recent Activity Timeline -->
-      <div class="timeline-section" v-if="recentActivity.length > 0">
-        <div class="timeline-card">
-          <div class="card-header">
-            <h3>Recent Activity</h3>
-            <div class="timeline-filters">
-              <button 
-                v-for="filter in activityFilters" 
-                :key="filter.value"
-                @click="selectedActivityFilter = filter.value"
-                class="filter-btn"
-                :class="{ active: selectedActivityFilter === filter.value }"
-              >
-                {{ filter.label }}
-              </button>
-            </div>
+      <div class="metric-card">
+        <div class="metric-icon payments">
+          <i class="fas fa-credit-card"></i>
+        </div>
+        <div class="metric-content">
+          <div class="metric-value">{{ dashboardData.overview.total_payments }}</div>
+          <div class="metric-title">Total Payments</div>
+          <div class="metric-subtitle">All transactions</div>
+        </div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon vouchers">
+          <i class="fas fa-ticket-alt"></i>
+        </div>
+        <div class="metric-content">
+          <div class="metric-value">{{ dashboardData.overview.total_vouchers }}</div>
+          <div class="metric-title">Total Vouchers</div>
+          <div class="metric-subtitle">Generated vouchers</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Plan Distribution -->
+    <div class="plan-section" v-if="dashboardData">
+      <h2>Plan Distribution</h2>
+      <div class="plan-grid">
+        <div class="plan-card" v-for="(plan, planName) in dashboardData.by_plan" :key="planName">
+          <div class="plan-header">
+            <h3>{{ formatPlanName(planName) }}</h3>
+            <div class="plan-count">{{ plan.count }} tenants</div>
           </div>
-          <div class="timeline">
-            <div 
-              v-for="activity in filteredActivity" 
-              :key="`${activity.type}-${activity.timestamp}`"
-              class="timeline-item"
-            >
-              <div class="timeline-marker" :class="activity.color">
-                <i :class="activity.icon"></i>
-              </div>
-              <div class="timeline-content">
-                <div class="timeline-title">{{ activity.title }}</div>
-                <div class="timeline-description">{{ activity.description }}</div>
-                <div class="timeline-time">{{ formatTime(activity.timestamp) }}</div>
-              </div>
-            </div>
+          <div class="plan-revenue">{{ formatCurrency(plan.revenue) }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="activity-section" v-if="dashboardData && dashboardData.recent_activity">
+      <h2>Recent Activity</h2>
+      <div class="activity-list">
+        <div v-for="activity in dashboardData.recent_activity.slice(0, 10)" :key="`${activity.type}-${activity.timestamp}`" class="activity-item">
+          <div class="activity-icon" :class="activity.color">
+            <i :class="`fas fa-${activity.icon}`"></i>
+          </div>
+          <div class="activity-content">
+            <div class="activity-title">{{ activity.title }}</div>
+            <div class="activity-description">{{ activity.description }}</div>
+            <div class="activity-time">{{ formatTime(activity.timestamp) }}</div>
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Loading State -->
+    <div v-if="isLoading" class="loading-state">
+      <div class="loading-spinner"></div>
+      <p>Loading dashboard data...</p>
+    </div>
+
+    <!-- Error State -->
+    <div v-if="apiError" class="error-state">
+      <div class="error-icon">
+        <i class="fas fa-exclamation-triangle"></i>
+      </div>
+      <h3>Unable to load dashboard data</h3>
+      <p>{{ apiError }}</p>
+      <button @click="loadDashboardData" class="retry-btn">
+        <i class="fas fa-redo"></i>
+        Try Again
+      </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
-import { useRealtimeStore } from '@/store/modules/realtime';
-import { useAppStore } from '@/store/modules/app';
-import axios from 'axios';
-import Chart from 'chart.js/auto';
-import ConnectionStatus from '@/components/common/ConnectionStatus.vue';
-import LoadingOverlay from '@/components/common/LoadingOverlay.vue';
-import MikroTikMonitor from '@/components/MikroTikMonitor.vue';
-import MetricCard from '@/components/common/MetricCard.vue';
+import { ref, onMounted } from 'vue';
+import api from '@/api/client';
 
-// Stores
-const realtimeStore = useRealtimeStore();
-const appStore = useAppStore();
-
-// Reactive data
-const stats = ref<any>({});
-const recentPayments = ref<any[]>([]);
-const recentVouchers = ref<any[]>([]);
-const recentActivity = ref<any[]>([]);
 const isLoading = ref(false);
-const isInitialLoading = ref(true);
-const revenueChartPeriod = ref('30d');
-const selectedActivityFilter = ref('all');
+const dashboardData = ref(null);
+const apiError = ref(null);
 
-// Chart references
-const revenueChart = ref<HTMLCanvasElement>();
-let revenueChartInstance: Chart | null = null;
-
-// Activity filters
-const activityFilters = [
-  { label: 'All', value: 'all' },
-  { label: 'Payments', value: 'payment' },
-  { label: 'Vouchers', value: 'voucher' },
-  { label: 'Customers', value: 'customer' },
-];
-
-// Computed
-const filteredActivity = computed(() => {
-  if (selectedActivityFilter.value === 'all') {
-    return recentActivity.value;
-  }
-  return recentActivity.value.filter(activity => activity.type === selectedActivityFilter.value);
-});
-
-// Auto-refresh interval
-let refreshInterval: NodeJS.Timeout | null = null;
-
-// Methods
 const loadDashboardData = async () => {
   try {
     isLoading.value = true;
-
-    // Load all dashboard data in parallel
-    const [statsResponse, paymentsResponse, vouchersResponse] = await Promise.all([
-      axios.get('/api/v1/dashboard/stats'),
-      axios.get('/api/v1/dashboard/recent-payments?limit=10'),
-      axios.get('/api/v1/dashboard/recent-vouchers?limit=10'),
-    ]);
-
-    stats.value = statsResponse.data.data;
-    recentPayments.value = paymentsResponse.data.data;
-    recentVouchers.value = vouchersResponse.data.data;
-    recentActivity.value = stats.value.recent_activity || [];
-
-    // Update revenue chart
-    await nextTick();
-    updateRevenueChart();
-
-  } catch (error) {
-    console.error('Failed to load dashboard data:', error);
-    appStore.addNotification({
-      type: 'error',
-      title: 'Dashboard Error',
-      message: 'Failed to load dashboard data. Please try again.',
-    });
+    apiError.value = null;
+    
+    // Check if user is authenticated
+    const authToken = localStorage.getItem('auth_token');
+    if (!authToken) {
+      console.log('No auth token found, redirecting to login');
+      // Redirect to login if no token
+      window.location.href = '/login';
+      return;
+    }
+    
+    console.log('Loading dashboard data with token:', authToken.substring(0, 20) + '...');
+    
+    const response = await api.get('/api/v1/dashboard/stats');
+    
+    if (response.data && response.data.data) {
+      dashboardData.value = response.data.data;
+      console.log('Dashboard data loaded successfully:', response.data.data);
+    } else {
+      throw new Error('Invalid response format');
+    }
+    
+  } catch (error: any) {
+    console.error('Dashboard API Error:', error);
+    
+    // If unauthorized, redirect to login
+    if (error.response?.status === 401) {
+      console.log('Unauthorized, clearing auth and redirecting to login');
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
+      localStorage.removeItem('tenant');
+      window.location.href = '/login';
+      return;
+    }
+    
+    apiError.value = error.message || 'Failed to load dashboard data';
   } finally {
     isLoading.value = false;
-    isInitialLoading.value = false;
   }
-};
-
-const refreshData = async () => {
-  if (!isLoading.value) {
-    await loadDashboardData();
-  }
-};
-
-const updateRevenueChart = () => {
-  if (!revenueChart.value || !stats.value.revenue?.analytics) return;
-
-  // Destroy existing chart
-  if (revenueChartInstance) {
-    revenueChartInstance.destroy();
-  }
-
-  const ctx = revenueChart.value.getContext('2d');
-  if (!ctx) return;
-
-  const analytics = stats.value.revenue.analytics;
-
-  revenueChartInstance = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: analytics.labels,
-      datasets: analytics.datasets,
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          display: false,
-        },
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: {
-            callback: function(value) {
-              return formatCurrency(value as number);
-            },
-          },
-        },
-      },
-      elements: {
-        point: {
-          radius: 4,
-          hoverRadius: 6,
-        },
-      },
-    },
-  });
-};
-
-const handleDeviceStatusChange = (deviceId: string, status: string) => {
-  // Update device status in real-time
-  realtimeStore.updateMikroTikDevice(deviceId, { status });
-  
-  // Refresh stats to update device counts
-  refreshData();
 };
 
 const formatCurrency = (amount: number): string => {
@@ -399,6 +162,11 @@ const formatCurrency = (amount: number): string => {
     currency: 'UGX',
     minimumFractionDigits: 0,
   }).format(amount);
+};
+
+const formatPlanName = (planName: string | null | undefined): string => {
+  if (!planName) return 'Unknown'
+  return planName.charAt(0).toUpperCase() + planName.slice(1);
 };
 
 const formatTime = (dateString: string): string => {
@@ -410,32 +178,347 @@ const formatTime = (dateString: string): string => {
   });
 };
 
-const formatCheckName = (name: string): string => {
-  return name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-};
-
-// Lifecycle
 onMounted(async () => {
-  await loadDashboardData();
+  // Wait a bit for app initialization to complete
+  await new Promise(resolve => setTimeout(resolve, 100));
   
-  // Set up auto-refresh every 30 seconds
-  refreshInterval = setInterval(() => {
-    if (!isLoading.value) {
-      loadDashboardData();
-    }
-  }, 30000);
-});
-
-onUnmounted(() => {
-  if (refreshInterval) {
-    clearInterval(refreshInterval);
-  }
-  
-  if (revenueChartInstance) {
-    revenueChartInstance.destroy();
-  }
+  console.log('Dashboard mounted, loading data...');
+  loadDashboardData();
 });
 </script>
+
+<style scoped>
+.dashboard {
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.dashboard-header {
+  margin-bottom: 2rem;
+}
+
+.dashboard-header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+}
+
+.dashboard-header p {
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 3rem;
+}
+
+.metric-card {
+  background: var(--card-bg);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.metric-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  color: white;
+  flex-shrink: 0;
+}
+
+.metric-icon.revenue {
+  background: linear-gradient(135deg, #10b981, #059669);
+}
+
+.metric-icon.customers {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+}
+
+.metric-icon.payments {
+  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+}
+
+.metric-icon.vouchers {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+}
+
+.metric-content {
+  flex: 1;
+}
+
+.metric-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.metric-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 0.125rem;
+}
+
+.metric-subtitle {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+.plan-section {
+  margin-bottom: 3rem;
+}
+
+.plan-section h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 1.5rem;
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.plan-card {
+  background: var(--card-bg);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border-color);
+  transition: transform 0.2s ease;
+}
+
+.plan-card:hover {
+  transform: translateY(-1px);
+}
+
+.plan-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.plan-header h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.plan-count {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: var(--bg-color);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+}
+
+.plan-revenue {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--primary-color);
+}
+
+.activity-section {
+  margin-bottom: 2rem;
+}
+
+.activity-section h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 1.5rem;
+}
+
+.activity-list {
+  background: var(--card-bg);
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+
+.activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  transition: background-color 0.2s ease;
+}
+
+.activity-item:last-child {
+  border-bottom: none;
+}
+
+.activity-item:hover {
+  background: var(--hover-bg);
+}
+
+.activity-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: white;
+}
+
+.activity-icon.green {
+  background: #10b981;
+}
+
+.activity-icon.blue {
+  background: #3b82f6;
+}
+
+.activity-icon.yellow {
+  background: #f59e0b;
+}
+
+.activity-icon.red {
+  background: #ef4444;
+}
+
+.activity-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.activity-description {
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.activity-time {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  text-align: center;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid var(--border-color);
+  border-top: 4px solid var(--primary-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 1rem;
+}
+
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  text-align: center;
+}
+
+.error-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: #fee2e2;
+  color: #dc2626;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.error-state h3 {
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+}
+
+.error-state p {
+  color: var(--text-secondary);
+  margin-bottom: 1.5rem;
+}
+
+.retry-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.retry-btn:hover {
+  background: var(--primary-hover);
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .dashboard {
+    padding: 1rem;
+  }
+  
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .plan-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .activity-item {
+    padding: 0.75rem 1rem;
+  }
+}
+</style>
 
 <style scoped>
 .dashboard {

@@ -184,7 +184,7 @@ import Modal from '@/components/common/Modal.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import CustomerDetailView from './CustomerDetailView.vue'
 import CustomerForm from './CustomerForm.vue'
-import api from '@/api/index'
+import api from '@/api/client'
 import type { Customer, Payment, SmsLog, ApiResponse } from '@/types'
 
 // Stores
@@ -671,7 +671,8 @@ const bulkDeleteCustomers = async (customers: Customer[]) => {
 }
 
 // Utility functions
-const formatStatus = (status: string) => {
+const formatStatus = (status: string | null | undefined) => {
+  if (!status) return 'Unknown'
   return status.charAt(0).toUpperCase() + status.slice(1)
 }
 

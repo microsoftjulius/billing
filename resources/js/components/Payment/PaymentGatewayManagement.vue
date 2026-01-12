@@ -453,7 +453,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useAppStore } from '@/store/modules/app'
 import Modal from '@/components/common/Modal.vue'
 import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
-import api from '@/api/index'
+import api from '@/api/client'
 
 interface PaymentGateway {
   id: string

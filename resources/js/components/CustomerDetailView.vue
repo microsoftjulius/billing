@@ -4,7 +4,7 @@
     <div class="customer-header">
       <div class="customer-info">
         <div class="customer-avatar">
-          <span class="avatar-text">{{ customer.name.charAt(0).toUpperCase() }}</span>
+          <span class="avatar-text">{{ customer.name?.charAt(0)?.toUpperCase() || '?' }}</span>
         </div>
         <div class="customer-details">
           <h2 class="customer-name">{{ customer.name }}</h2>
@@ -377,7 +377,8 @@ const handleSendSms = (smsData: any) => {
   showSendSmsModal.value = false
 }
 
-const formatStatus = (status: string) => {
+const formatStatus = (status: string | null | undefined) => {
+  if (!status) return 'Unknown'
   return status.charAt(0).toUpperCase() + status.slice(1)
 }
 

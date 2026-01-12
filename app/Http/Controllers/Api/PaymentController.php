@@ -10,6 +10,7 @@ use App\Jobs\ProcessSuccessfulPayment;
 use App\Models\Payment;
 use App\Models\Customer;
 use App\Models\Tenant;
+use App\Services\DatabaseContextService;
 use App\Services\Payment\CollectUgService;
 use App\Services\Payment\PaymentGatewayManager;
 use Illuminate\Http\JsonResponse;
@@ -21,43 +22,12 @@ use Illuminate\Http\Request;
 class PaymentController extends Controller
 {
     private PaymentGatewayManager $gatewayManager;
-    private ?Tenant $currentTenant;
+    private DatabaseContextService $dbContextService;
 
-    public function __construct(PaymentGatewayManager $gatewayManager)
+    public function __construct(PaymentGatewayManager $gatewayManager, DatabaseContextService $dbContextService)
     {
         $this->gatewayManager = $gatewayManager;
-        $this->currentTenant = $this->resolveTenant();
-    }
-
-    /**
-     * Resolve the current tenant from the request
-     */
-    private function resolveTenant(): ?Tenant
-    {
-        // Method 1: From header (for API calls)
-        if (request()->hasHeader('X-Tenant-ID')) {
-            return Tenant::where('uuid', request()->header('X-Tenant-ID'))->first();
-        }
-
-        // Method 2: From subdomain (for web calls)
-        $host = request()->getHost();
-        $subdomain = explode('.', $host)[0];
-
-        if ($subdomain && $subdomain !== 'www' && $subdomain !== 'api') {
-            return Tenant::where('subdomain', $subdomain)->first();
-        }
-
-        // Method 3: From request parameter (for shared routes)
-        if (request()->has('tenant_id')) {
-            return Tenant::where('uuid', request()->get('tenant_id'))->first();
-        }
-
-        // Method 4: From authenticated user (if applicable)
-        if (auth()->check() && method_exists(auth()->user(), 'tenant')) {
-            return auth()->user()->tenant;
-        }
-
-        return null; // No tenant resolved
+        $this->dbContextService = $dbContextService;
     }
 
     /**
@@ -68,6 +38,10 @@ class PaymentController extends Controller
         DB::beginTransaction();
 
         try {
+            $user = auth()->user();
+            $connection = $this->dbContextService->getConnection($user);
+            $currentTenant = $this->dbContextService->getCurrentTenant($user);
+            
             // Get validated data with defaults
             $validated = $request->validated();
 
@@ -87,23 +61,21 @@ class PaymentController extends Controller
             ];
 
             // Add tenant context if available
-            if ($this->currentTenant) {
-                $customerMetadata['tenant_id'] = $this->currentTenant->id;
-                $customerMetadata['tenant_code'] = $this->currentTenant->code;
-                $paymentMetadata['tenant_id'] = $this->currentTenant->id;
-                $paymentMetadata['tenant_code'] = $this->currentTenant->code;
-                $paymentMetadata['tenant_name'] = $this->currentTenant->name;
+            if ($currentTenant) {
+                $customerMetadata['tenant_id'] = $currentTenant->id;
+                $customerMetadata['tenant_code'] = $currentTenant->code;
+                $paymentMetadata['tenant_id'] = $currentTenant->id;
+                $paymentMetadata['tenant_code'] = $currentTenant->code;
+                $paymentMetadata['tenant_name'] = $currentTenant->name;
             }
 
             // Find or create customer (scoped by tenant if applicable)
-            $customerQuery = Customer::where('phone', $validated['phone']);
-
-            if ($this->currentTenant) {
+            if ($currentTenant) {
                 // If tenant exists, create customer with tenant context
-                $customer = Customer::firstOrCreate(
+                $customer = Customer::on($connection)->firstOrCreate(
                     [
                         'phone' => $validated['phone'],
-                        'tenant_id' => $this->currentTenant->id,
+                        'tenant_id' => $currentTenant->id,
                     ],
                     [
                         'uuid' => Str::orderedUuid(),
@@ -111,12 +83,12 @@ class PaymentController extends Controller
                         'email' => $validated['email'] ?? null,
                         'is_active' => true,
                         'metadata' => $customerMetadata,
-                        'tenant_id' => $this->currentTenant->id,
+                        'tenant_id' => $currentTenant->id,
                     ]
                 );
             } else {
                 // Global customer (no tenant)
-                $customer = Customer::firstOrCreate(
+                $customer = Customer::on($connection)->firstOrCreate(
                     ['phone' => $validated['phone']],
                     [
                         'uuid' => Str::orderedUuid(),
@@ -129,7 +101,7 @@ class PaymentController extends Controller
             }
 
             // Generate unique transaction ID with tenant prefix if applicable
-            $tenantPrefix = $this->currentTenant ? 'TENANT-' . $this->currentTenant->code . '-' : 'PAY-';
+            $tenantPrefix = $currentTenant ? 'TENANT-' . $currentTenant->code . '-' : 'PAY-';
             $transactionId = $tenantPrefix . now()->format('Ymd') . '-' . strtoupper(Str::random(8));
 
             // Create payment record
@@ -146,11 +118,11 @@ class PaymentController extends Controller
             ];
 
             // Add tenant_id to payment if tenant exists
-            if ($this->currentTenant) {
-                $paymentData['tenant_id'] = $this->currentTenant->id;
+            if ($currentTenant) {
+                $paymentData['tenant_id'] = $currentTenant->id;
             }
 
-            $payment = Payment::create($paymentData);
+            $payment = Payment::on($connection)->create($paymentData);
 
             // Prepare payment request DTO with tenant context
             $metadata = [
@@ -163,9 +135,9 @@ class PaymentController extends Controller
             ];
 
             // Add tenant to metadata for gateway
-            if ($this->currentTenant) {
-                $metadata['tenant_id'] = $this->currentTenant->id;
-                $metadata['tenant_code'] = $this->currentTenant->code;
+            if ($currentTenant) {
+                $metadata['tenant_id'] = $currentTenant->id;
+                $metadata['tenant_code'] = $currentTenant->code;
             }
 
             $paymentRequest = new PaymentRequestDTO(
@@ -185,12 +157,12 @@ class PaymentController extends Controller
             ];
 
             // Add tenant context to logs
-            if ($this->currentTenant) {
-                $logContext['tenant_id'] = $this->currentTenant->id;
-                $logContext['tenant_code'] = $this->currentTenant->code;
+            if ($currentTenant) {
+                $logContext['tenant_id'] = $currentTenant->id;
+                $logContext['tenant_code'] = $currentTenant->code;
             }
 
-            Log::channel('payment')->info('Initiating payment with gateway manager', $logContext);
+            Log::info('Initiating payment with gateway manager', $logContext);
 
             // Initialize payment with gateway manager
             $paymentResponse = $this->gatewayManager->processPayment($paymentRequest);
@@ -217,11 +189,11 @@ class PaymentController extends Controller
             ];
 
             // Add tenant context to success logs
-            if ($this->currentTenant) {
-                $successLogContext['tenant_id'] = $this->currentTenant->id;
+            if ($currentTenant) {
+                $successLogContext['tenant_id'] = $currentTenant->id;
             }
 
-            Log::channel('payment')->info('Payment initiated successfully', $successLogContext);
+            Log::info('Payment initiated successfully', $successLogContext);
 
             // Prepare response data
             $responseData = [
@@ -242,14 +214,14 @@ class PaymentController extends Controller
             ];
 
             // Add tenant to response if exists
-            if ($this->currentTenant) {
+            if ($currentTenant) {
                 $responseData['tenant'] = [
-                    'id' => $this->currentTenant->id,
-                    'code' => $this->currentTenant->code,
-                    'name' => $this->currentTenant->name,
+                    'id' => $currentTenant->id,
+                    'code' => $currentTenant->code,
+                    'name' => $currentTenant->name,
                 ];
                 $responseData['check_status_url'] = route('api.payments.verify', [
-                    'tenant' => $this->currentTenant->code,
+                    'tenant' => $currentTenant->code,
                     'transactionId' => $transactionId
                 ]);
             } else {
@@ -276,11 +248,12 @@ class PaymentController extends Controller
             ];
 
             // Add tenant context to error logs
-            if ($this->currentTenant) {
-                $errorLogContext['tenant_id'] = $this->currentTenant->id;
+            $user = auth()->user();
+            if ($user && $user->tenant_id) {
+                $errorLogContext['tenant_id'] = $user->tenant_id;
             }
 
-            Log::channel('payment')->error('Payment initiation failed', $errorLogContext);
+            Log::error('Payment initiation failed', $errorLogContext);
 
             return response()->json([
                 'success' => false,
@@ -305,7 +278,10 @@ class PaymentController extends Controller
         }
 
         try {
-            $query = Payment::with(['customer', 'voucher']);
+            $user = auth()->user();
+            $connection = $this->dbContextService->getConnection($user);
+            
+            $query = Payment::on($connection)->with(['customer', 'voucher']);
 
             // If tenant code is provided, scope by tenant
             if ($tenantCode) {
@@ -338,7 +314,7 @@ class PaymentController extends Controller
             }
 
             // Verify payment with gateway
-            $verificationResponse = $this->paymentGateway->verifyPayment($payment->reference ?? $transactionId);
+            $verificationResponse = $this->gatewayManager->verifyPayment($payment->reference ?? $transactionId);
 
             if ($verificationResponse->success && $payment->status !== 'completed') {
                 // Mark payment as completed
@@ -458,12 +434,16 @@ class PaymentController extends Controller
         DB::beginTransaction();
 
         try {
+            // Use tenant database connection for finding payment
+            $user = auth()->user();
+            $connection = $this->dbContextService->getConnection($user);
+            
             // Find payment by reference
-            $payment = Payment::where('reference', $reference)->first();
+            $payment = Payment::on($connection)->where('reference', $reference)->first();
 
             if (!$payment) {
                 // Try to find by transaction ID as fallback
-                $payment = Payment::where('transaction_id', $reference)->first();
+                $payment = Payment::on($connection)->where('transaction_id', $reference)->first();
 
                 if (!$payment) {
                     Log::channel('payment')->warning('Payment not found for callback', [
@@ -567,15 +547,24 @@ class PaymentController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
+            $user = auth()->user();
+            $connection = DatabaseContextService::getConnection($user);
+            
             $perPage = min($request->get('per_page', 15), 100); // Max 100 per page
             $page = $request->get('page', 1);
 
-            $query = Payment::with(['customer', 'voucher'])
+            $query = Payment::on($connection)->with(['customer', 'voucher'])
                 ->orderBy('created_at', 'desc');
 
-            // Scope by tenant if current tenant exists
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
+            // Apply tenant filtering
+            if (DatabaseContextService::isGlobalAdmin($user)) {
+                // Global admin can see all payments across tenants
+                if ($request->has('tenant_id')) {
+                    $query->where('tenant_id', $request->tenant_id);
+                }
+            } else {
+                // Tenant users only see their own payments
+                $query->where('tenant_id', $user->tenant_id);
             }
 
             // Apply filters
@@ -613,11 +602,6 @@ class PaymentController extends Controller
                 $query->whereJsonContains('metadata->package', $request->get('package'));
             }
 
-            // Filter by tenant_id if explicitly requested
-            if ($request->has('tenant_id') && !$this->currentTenant) {
-                $query->where('tenant_id', $request->get('tenant_id'));
-            }
-
             $payments = $query->paginate($perPage, ['*'], 'page', $page);
 
             $responseData = [
@@ -642,12 +626,15 @@ class PaymentController extends Controller
             ];
 
             // Add tenant info to response if tenant exists
-            if ($this->currentTenant) {
-                $responseData['tenant'] = [
-                    'id' => $this->currentTenant->id,
-                    'code' => $this->currentTenant->code,
-                    'name' => $this->currentTenant->name,
-                ];
+            if ($user->tenant_id) {
+                $tenant = Tenant::find($user->tenant_id);
+                if ($tenant) {
+                    $responseData['tenant'] = [
+                        'id' => $tenant->id,
+                        'code' => $tenant->code,
+                        'name' => $tenant->name,
+                    ];
+                }
                 // Add tenant-specific summary
                 $responseData['data']['summary']['unique_customers'] = $payments->unique('customer_id')->count();
             }
@@ -660,8 +647,8 @@ class PaymentController extends Controller
                 'filters' => $request->all()
             ];
 
-            if ($this->currentTenant) {
-                $errorContext['tenant_id'] = $this->currentTenant->id;
+            if ($user->tenant_id ?? null) {
+                $errorContext['tenant_id'] = $user->tenant_id;
             }
 
             Log::channel('payment')->error('Failed to fetch payments', $errorContext);
@@ -689,7 +676,10 @@ class PaymentController extends Controller
         }
 
         try {
-            $query = Payment::with(['customer', 'voucher']);
+            $user = auth()->user();
+            $connection = $this->dbContextService->getConnection($user);
+            
+            $query = Payment::on($connection)->with(['customer', 'voucher']);
 
             // If tenant code is provided, scope by tenant
             if ($tenantCode) {
@@ -745,13 +735,22 @@ class PaymentController extends Controller
     public function statistics(Request $request): JsonResponse
     {
         try {
+            $user = auth()->user();
+            $connection = DatabaseContextService::getConnection($user);
+            
             $period = $request->get('period', 'today'); // today, week, month, year, custom
 
-            $query = Payment::query();
+            $query = Payment::on($connection);
 
-            // Scope by tenant if current tenant exists
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
+            // Apply tenant filtering
+            if (DatabaseContextService::isGlobalAdmin($user)) {
+                // Global admin can see all payments across tenants
+                if ($request->has('tenant_id')) {
+                    $query->where('tenant_id', $request->tenant_id);
+                }
+            } else {
+                // Tenant users only see their own payments
+                $query->where('tenant_id', $user->tenant_id);
             }
 
             // Apply period filter
@@ -784,10 +783,10 @@ class PaymentController extends Controller
             $averageAmount = $completedPayments > 0 ? round($totalRevenue / $completedPayments, 2) : 0;
 
             // Popular packages
-            $popularQuery = Payment::where('status', 'completed');
+            $popularQuery = Payment::on($connection)->where('status', 'completed');
 
-            if ($this->currentTenant) {
-                $popularQuery->where('tenant_id', $this->currentTenant->id);
+            if (!DatabaseContextService::isGlobalAdmin($user)) {
+                $popularQuery->where('tenant_id', $user->tenant_id);
             }
 
             $popularPackages = $popularQuery
@@ -810,20 +809,22 @@ class PaymentController extends Controller
                     'total_revenue' => $totalRevenue,
                     'average_amount' => $averageAmount,
                     'popular_packages' => $popularPackages,
-                    'period_start' => $query->getQuery()->wheres[0]['value'] ?? null,
-                    'period_end' => $query->getQuery()->wheres[1]['value'] ?? null,
                 ]
             ];
 
             // Add tenant-specific statistics
-            if ($this->currentTenant) {
+            if ($user->tenant_id) {
                 $uniqueCustomers = (clone $query)->distinct('customer_id')->count('customer_id');
                 $responseData['data']['unique_customers'] = $uniqueCustomers;
-                $responseData['tenant'] = [
-                    'id' => $this->currentTenant->id,
-                    'code' => $this->currentTenant->code,
-                    'name' => $this->currentTenant->name,
-                ];
+                
+                $tenant = Tenant::find($user->tenant_id);
+                if ($tenant) {
+                    $responseData['tenant'] = [
+                        'id' => $tenant->id,
+                        'code' => $tenant->code,
+                        'name' => $tenant->name,
+                    ];
+                }
             }
 
             return response()->json($responseData);
@@ -834,11 +835,11 @@ class PaymentController extends Controller
                 'period' => $period
             ];
 
-            if ($this->currentTenant) {
-                $errorContext['tenant_id'] = $this->currentTenant->id;
+            if ($user->tenant_id ?? null) {
+                $errorContext['tenant_id'] = $user->tenant_id;
             }
 
-            Log::channel('payment')->error('Failed to fetch payment statistics', $errorContext);
+            Log::error('Failed to fetch payment statistics', $errorContext);
 
             return response()->json([
                 'success' => false,
@@ -854,12 +855,22 @@ class PaymentController extends Controller
     public function export(Request $request): JsonResponse
     {
         try {
-            $query = Payment::with(['customer'])
+            $user = auth()->user();
+            $connection = $this->dbContextService->getConnection($user);
+            $currentTenant = $this->dbContextService->getCurrentTenant($user);
+            
+            $query = Payment::on($connection)->with(['customer'])
                 ->orderBy('created_at', 'desc');
 
-            // Scope by tenant if current tenant exists
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
+            // Apply tenant filtering
+            if ($this->dbContextService->isGlobalAdmin($user)) {
+                // Global admin can see all payments across tenants
+                if ($request->has('tenant_id')) {
+                    $query->where('tenant_id', $request->tenant_id);
+                }
+            } else {
+                // Tenant users only see their own payments
+                $query->where('tenant_id', $user->tenant_id);
             }
 
             // Apply filters
@@ -899,7 +910,7 @@ class PaymentController extends Controller
             }
 
             // Generate filename with tenant prefix if applicable
-            $filename = 'payments_' . ($this->currentTenant ? $this->currentTenant->code . '_' : '') . now()->format('Y-m-d') . '.csv';
+            $filename = 'payments_' . ($currentTenant ? $currentTenant->code . '_' : '') . now()->format('Y-m-d') . '.csv';
 
             // Return CSV as downloadable response
             return response()->streamDownload(function () use ($csvData) {
@@ -912,8 +923,9 @@ class PaymentController extends Controller
         } catch (\Exception $e) {
             $errorContext = ['error' => $e->getMessage()];
 
-            if ($this->currentTenant) {
-                $errorContext['tenant_id'] = $this->currentTenant->id;
+            $user = auth()->user();
+            if ($user && $user->tenant_id) {
+                $errorContext['tenant_id'] = $user->tenant_id;
             }
 
             Log::channel('payment')->error('Failed to export payments', $errorContext);
@@ -1016,6 +1028,9 @@ class PaymentController extends Controller
         DB::beginTransaction();
 
         try {
+            $user = auth()->user();
+            $currentTenant = $this->dbContextService->getCurrentTenant($user);
+            
             // Store original values for audit trail
             $originalValues = $payment->only(['amount', 'currency', 'status']);
             $changes = [];
@@ -1058,8 +1073,8 @@ class PaymentController extends Controller
                 'user_id' => auth()->id()
             ];
 
-            if ($this->currentTenant) {
-                $logContext['tenant_id'] = $this->currentTenant->id;
+            if ($currentTenant) {
+                $logContext['tenant_id'] = $currentTenant->id;
             }
 
             Log::channel('payment')->info('Payment record updated', $logContext);
@@ -1079,8 +1094,9 @@ class PaymentController extends Controller
                 'user_id' => auth()->id()
             ];
 
-            if ($this->currentTenant) {
-                $errorContext['tenant_id'] = $this->currentTenant->id;
+            $user = auth()->user();
+            if ($user && $user->tenant_id) {
+                $errorContext['tenant_id'] = $user->tenant_id;
             }
 
             Log::channel('payment')->error('Payment update failed', $errorContext);
@@ -1105,12 +1121,22 @@ class PaymentController extends Controller
         ]);
 
         try {
-            $query = Payment::with(['customer'])
+            $user = auth()->user();
+            $connection = $this->dbContextService->getConnection($user);
+            $currentTenant = $this->dbContextService->getCurrentTenant($user);
+            
+            $query = Payment::on($connection)->with(['customer'])
                 ->whereBetween('created_at', [$request->start_date, $request->end_date]);
 
-            // Scope by tenant if current tenant exists
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
+            // Apply tenant filtering
+            if ($this->dbContextService->isGlobalAdmin($user)) {
+                // Global admin can see all payments across tenants
+                if ($request->has('tenant_id')) {
+                    $query->where('tenant_id', $request->tenant_id);
+                }
+            } else {
+                // Tenant users only see their own payments
+                $query->where('tenant_id', $user->tenant_id);
             }
 
             // Filter by gateway if specified
@@ -1170,8 +1196,9 @@ class PaymentController extends Controller
                 'request_data' => $request->all()
             ];
 
-            if ($this->currentTenant) {
-                $errorContext['tenant_id'] = $this->currentTenant->id;
+            $user = auth()->user();
+            if ($user && $user->tenant_id) {
+                $errorContext['tenant_id'] = $user->tenant_id;
             }
 
             Log::channel('payment')->error('Payment reconciliation failed', $errorContext);
@@ -1194,9 +1221,12 @@ class PaymentController extends Controller
         ]);
 
         try {
+            $user = auth()->user();
+            $connection = $this->dbContextService->getConnection($user);
+            
             // Find payment by discrepancy ID (in real implementation, 
             // you'd have a separate discrepancies table)
-            $payment = Payment::findOrFail($discrepancyId);
+            $payment = Payment::on($connection)->findOrFail($discrepancyId);
 
             // Update payment status or take corrective action
             $payment->update([
@@ -1240,7 +1270,10 @@ class PaymentController extends Controller
         ]);
 
         try {
-            $payment = Payment::findOrFail($discrepancyId);
+            $user = auth()->user();
+            $connection = $this->dbContextService->getConnection($user);
+            
+            $payment = Payment::on($connection)->findOrFail($discrepancyId);
 
             // Flag as disputed
             $payment->update([

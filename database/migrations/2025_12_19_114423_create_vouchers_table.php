@@ -11,8 +11,8 @@ return new class extends Migration
         Schema::create('vouchers', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->string('uuid')->unique()->nullable();
-            $table->foreignUuid('customer_id')->constrained('customers')->cascadeOnDelete();
-            $table->foreignUuid('payment_id')->constrained('payments')->cascadeOnDelete();
+            $table->foreignUuid('customer_id')->nullable()->constrained('customers')->cascadeOnDelete();
+            $table->foreignUuid('payment_id')->nullable()->constrained('payments')->cascadeOnDelete();
             $table->string('code')->unique();
             $table->string('password');
             $table->string('profile')->index()->comment('daily_1gb, weekly_5gb, etc');

@@ -27,7 +27,8 @@ class Customer extends BaseModel
         'gender',
         'is_active',
         'last_login_at',
-        'metadata'
+        'metadata',
+        'tenant_id'
     ];
 
     protected $casts = [

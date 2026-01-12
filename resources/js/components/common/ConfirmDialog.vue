@@ -12,8 +12,11 @@
         :loading="loading"
         :confirm-text="confirmButtonText"
         :cancel-text="cancelButtonText"
+        :confirm-button-variant="confirmButtonVariant"
+        :cancel-button-variant="cancelButtonVariant"
         :show-footer="true"
         :prevent-close="loading"
+        :persistent="persistent"
         @confirm="handleConfirm"
         @cancel="handleCancel"
     >
@@ -45,9 +48,34 @@
                     :placeholder="inputPlaceholder"
                     :required="inputRequired"
                     class="form-input"
+                    :class="{ 'error': inputError }"
                     @keyup.enter="handleConfirm"
                 />
                 <div v-if="inputError" class="input-error">{{ inputError }}</div>
+            </div>
+
+            <div v-if="showCheckbox" class="confirm-checkbox">
+                <label class="checkbox-label">
+                    <input
+                        type="checkbox"
+                        v-model="checkboxValue"
+                        class="checkbox-input"
+                        :required="checkboxRequired"
+                    />
+                    <span class="checkbox-text">{{ checkboxText }}</span>
+                </label>
+            </div>
+
+            <div v-if="countdown > 0" class="countdown-timer">
+                <div class="countdown-text">
+                    Auto-{{ autoAction }} in {{ countdown }} seconds
+                </div>
+                <div class="countdown-bar">
+                    <div 
+                        class="countdown-progress" 
+                        :style="{ width: `${(countdown / countdownDuration) * 100}%` }"
+                    ></div>
+                </div>
             </div>
         </div>
 
@@ -172,13 +200,45 @@ export default {
         validateInput: {
             type: Function,
             default: null
+        },
+        showCheckbox: {
+            type: Boolean,
+            default: false
+        },
+        checkboxText: {
+            type: String,
+            default: 'I understand the consequences'
+        },
+        checkboxRequired: {
+            type: Boolean,
+            default: false
+        },
+        checkboxValueProp: {
+            type: Boolean,
+            default: false
+        },
+        autoAction: {
+            type: String,
+            default: '',
+            validator: value => ['', 'confirm', 'cancel'].includes(value)
+        },
+        countdownDuration: {
+            type: Number,
+            default: 10
+        },
+        persistent: {
+            type: Boolean,
+            default: false
         }
     },
     data() {
         return {
             inputValue: this.inputValueProp,
             inputError: '',
-            inputId: `confirm-input-${Math.random().toString(36).substr(2, 9)}`
+            inputId: `confirm-input-${Math.random().toString(36).substr(2, 9)}`,
+            checkboxValue: this.checkboxValueProp,
+            countdown: 0,
+            countdownTimer: null
         }
     },
     computed: {
@@ -214,6 +274,13 @@ export default {
 
         hasDetails() {
             return this.detailsTitle || this.detailsText || this.$slots.details
+        },
+
+        canConfirm() {
+            if (this.showCheckbox && this.checkboxRequired && !this.checkboxValue) {
+                return false
+            }
+            return true
         }
     },
     watch: {
@@ -221,11 +288,17 @@ export default {
             this.inputValue = newVal
         },
 
+        checkboxValueProp(newVal) {
+            this.checkboxValue = newVal
+        },
+
         visible(newVal) {
             if (newVal) {
                 this.resetInput()
+                this.startCountdown()
                 this.$emit('open')
             } else {
+                this.stopCountdown()
                 this.$emit('close')
             }
         }
@@ -240,10 +313,19 @@ export default {
                 }
             }
 
-            this.$emit('confirm', this.inputValue)
+            if (this.showCheckbox && this.checkboxRequired && !this.checkboxValue) {
+                return
+            }
+
+            this.stopCountdown()
+            this.$emit('confirm', {
+                inputValue: this.inputValue,
+                checkboxValue: this.checkboxValue
+            })
         },
 
         handleCancel() {
+            this.stopCountdown()
             this.$emit('cancel')
             this.close()
         },
@@ -255,6 +337,7 @@ export default {
         },
 
         close() {
+            this.stopCountdown()
             this.$emit('update:visible', false)
             this.$emit('closed')
         },
@@ -262,7 +345,37 @@ export default {
         resetInput() {
             this.inputValue = this.inputValueProp
             this.inputError = ''
+            this.checkboxValue = this.checkboxValueProp
+        },
+
+        startCountdown() {
+            if (this.autoAction && this.countdownDuration > 0) {
+                this.countdown = this.countdownDuration
+                this.countdownTimer = setInterval(() => {
+                    this.countdown--
+                    if (this.countdown <= 0) {
+                        this.stopCountdown()
+                        if (this.autoAction === 'confirm') {
+                            this.handleConfirm()
+                        } else if (this.autoAction === 'cancel') {
+                            this.handleCancel()
+                        }
+                    }
+                }, 1000)
+            }
+        },
+
+        stopCountdown() {
+            if (this.countdownTimer) {
+                clearInterval(this.countdownTimer)
+                this.countdownTimer = null
+                this.countdown = 0
+            }
         }
+    },
+
+    beforeUnmount() {
+        this.stopCountdown()
     }
 }
 </script>
@@ -381,6 +494,64 @@ export default {
     color: #9ca3af;
 }
 
+.form-input.error {
+    border-color: #ef4444;
+}
+
+.input-error {
+    color: #ef4444;
+    font-size: 0.875rem;
+    margin-top: 4px;
+}
+
+.confirm-checkbox {
+    margin: 24px 0;
+    text-align: left;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.checkbox-input {
+    width: 16px;
+    height: 16px;
+    accent-color: #3b82f6;
+}
+
+.checkbox-text {
+    font-size: 0.95rem;
+    color: #374151;
+}
+
+.countdown-timer {
+    margin: 24px 0;
+    text-align: center;
+}
+
+.countdown-text {
+    font-size: 0.875rem;
+    color: #6b7280;
+    margin-bottom: 8px;
+}
+
+.countdown-bar {
+    width: 100%;
+    height: 4px;
+    background: #e5e7eb;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.countdown-progress {
+    height: 100%;
+    background: #3b82f6;
+    transition: width 1s linear;
+}
+
 .input-error {
     color: #ef4444;
     font-size: 0.875rem;
@@ -394,3 +565,28 @@ export default {
 .text-red-500 { color: #ef4444; }
 .text-gray-500 { color: #6b7280; }
 </style>
+
+/* Dark theme support for new elements */
+@media (prefers-color-scheme: dark) {
+    .checkbox-text {
+        color: #f3f4f6;
+    }
+
+    .countdown-text {
+        color: #9ca3af;
+    }
+
+    .countdown-bar {
+        background: #374151;
+    }
+
+    .form-input {
+        background: #374151;
+        border-color: #4b5563;
+        color: #f9fafb;
+    }
+
+    .form-input.error {
+        border-color: #f87171;
+    }
+}

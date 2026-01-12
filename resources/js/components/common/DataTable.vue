@@ -1143,10 +1143,10 @@ export default {
 <style scoped>
 /* Base styles */
 .data-table-wrapper {
-    background: white;
+    background: var(--card-bg);
     border-radius: 8px;
     overflow: hidden;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-sm);
 }
 
 /* Table Header */
@@ -1155,8 +1155,8 @@ export default {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    border-bottom: 1px solid #e5e7eb;
-    background: #f9fafb;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
 }
 
 .header-left {
@@ -1168,12 +1168,12 @@ export default {
     margin: 0 0 4px;
     font-size: 1.25rem;
     font-weight: 600;
-    color: #111827;
+    color: var(--text-primary);
 }
 
 .table-description {
     font-size: 0.875rem;
-    color: #6b7280;
+    color: var(--text-secondary);
 }
 
 .header-right {
@@ -1196,22 +1196,23 @@ export default {
     transform: translateY(-50%);
     width: 16px;
     height: 16px;
-    color: #9ca3af;
+    color: var(--text-tertiary);
 }
 
 .search-input {
     width: 100%;
     padding: 10px 36px 10px 40px;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--border-color);
     border-radius: 6px;
     font-size: 0.875rem;
     transition: all 0.2s ease;
-    background: white;
+    background: var(--bg-primary);
+    color: var(--text-primary);
 }
 
 .search-input:focus {
     outline: none;
-    border-color: #3b82f6;
+    border-color: var(--primary-color);
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
@@ -1224,7 +1225,7 @@ export default {
     height: 20px;
     border: none;
     background: none;
-    color: #9ca3af;
+    color: var(--text-tertiary);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -1234,8 +1235,8 @@ export default {
 }
 
 .clear-search:hover {
-    background: #f3f4f6;
-    color: #374151;
+    background: var(--hover-bg);
+    color: var(--text-secondary);
 }
 
 .clear-icon {
@@ -1252,25 +1253,25 @@ export default {
     position: relative;
     width: 36px;
     height: 36px;
-    border: 1px solid #d1d5db;
-    background: white;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
     border-radius: 6px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #6b7280;
+    color: var(--text-secondary);
     transition: all 0.2s ease;
 }
 
 .filter-btn:hover {
-    background: #f3f4f6;
-    border-color: #9ca3af;
+    background: var(--hover-bg);
+    border-color: var(--text-tertiary);
 }
 
 .filter-btn.active {
-    background: #3b82f6;
-    border-color: #3b82f6;
+    background: var(--primary-color);
+    border-color: var(--primary-color);
     color: white;
 }
 
@@ -1283,7 +1284,7 @@ export default {
     position: absolute;
     top: -4px;
     right: -4px;
-    background: #ef4444;
+    background: var(--error-color);
     color: white;
     font-size: 0.75rem;
     font-weight: 600;
@@ -1294,7 +1295,7 @@ export default {
     align-items: center;
     justify-content: center;
     padding: 0 4px;
-    border: 2px solid white;
+    border: 2px solid var(--card-bg);
 }
 
 .filter-panel {
@@ -1303,17 +1304,17 @@ export default {
     right: 0;
     margin-top: 8px;
     width: 300px;
-    background: white;
-    border: 1px solid #e5e7eb;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-lg);
     z-index: 100;
     animation: slideDown 0.2s ease;
 }
 
 .filter-panel-header {
     padding: 16px;
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1323,13 +1324,13 @@ export default {
     margin: 0;
     font-size: 1rem;
     font-weight: 600;
-    color: #111827;
+    color: var(--text-primary);
 }
 
 .filter-clear-all {
     background: none;
     border: none;
-    color: #ef4444;
+    color: var(--error-color);
     font-size: 0.875rem;
     font-weight: 500;
     cursor: pointer;
@@ -1339,7 +1340,7 @@ export default {
 }
 
 .filter-clear-all:hover {
-    background: #fee2e2;
+    background: var(--error-bg);
 }
 
 .filter-options {
@@ -1360,7 +1361,7 @@ export default {
     display: block;
     margin-bottom: 6px;
     font-weight: 500;
-    color: #374151;
+    color: var(--text-primary);
     font-size: 0.875rem;
 }
 
@@ -1368,25 +1369,26 @@ export default {
 .filter-input {
     width: 100%;
     padding: 8px 12px;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--border-color);
     border-radius: 6px;
     font-size: 0.875rem;
     transition: all 0.2s ease;
-    background: white;
+    background: var(--bg-primary);
+    color: var(--text-primary);
 }
 
 .filter-select:focus,
 .filter-input:focus {
     outline: none;
-    border-color: #3b82f6;
+    border-color: var(--primary-color);
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 /* Active Filters Bar */
 .active-filters-bar {
     padding: 12px 24px;
-    background: #f8fafc;
-    border-bottom: 1px solid #e5e7eb;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
 }
 
 .active-filters {
@@ -1398,7 +1400,7 @@ export default {
 
 .filters-label {
     font-size: 0.875rem;
-    color: #6b7280;
+    color: var(--text-secondary);
     font-weight: 500;
 }
 
@@ -1478,20 +1480,20 @@ export default {
 .action-btn {
     width: 36px;
     height: 36px;
-    border: 1px solid #d1d5db;
-    background: white;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
     border-radius: 6px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #6b7280;
+    color: var(--text-secondary);
     transition: all 0.2s ease;
 }
 
 .action-btn:hover {
-    background: #f3f4f6;
-    border-color: #9ca3af;
+    background: var(--hover-bg);
+    border-color: var(--text-tertiary);
 }
 
 .action-btn:disabled {
@@ -1529,10 +1531,10 @@ export default {
     top: 100%;
     right: 0;
     margin-top: 4px;
-    background: white;
-    border: 1px solid #e5e7eb;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
     border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-md);
     z-index: 100;
     min-width: 160px;
     animation: slideDown 0.2s ease;
@@ -1549,12 +1551,12 @@ export default {
     align-items: center;
     gap: 8px;
     font-size: 0.875rem;
-    color: #374151;
+    color: var(--text-primary);
     transition: background 0.2s ease;
 }
 
 .export-option:hover {
-    background: #f3f4f6;
+    background: var(--hover-bg);
 }
 
 .export-option:first-child {
@@ -1594,7 +1596,7 @@ export default {
 }
 
 .data-table thead {
-    background: #f9fafb;
+    background: var(--bg-secondary);
     position: sticky;
     top: 0;
     z-index: 10;
@@ -1604,30 +1606,30 @@ export default {
     padding: 12px 16px;
     text-align: left;
     font-weight: 600;
-    color: #374151;
+    color: var(--text-primary);
     font-size: 0.875rem;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    border-bottom: 2px solid #e5e7eb;
+    border-bottom: 2px solid var(--border-color);
     white-space: nowrap;
     position: relative;
 }
 
 .data-table tbody tr {
-    border-bottom: 1px solid #f3f4f6;
+    border-bottom: 1px solid var(--border-light);
     transition: background-color 0.2s ease;
 }
 
 .data-table.striped tbody tr:nth-child(even) {
-    background: #f9fafb;
+    background: var(--bg-secondary);
 }
 
 .data-table tbody tr:hover {
-    background: #f3f4f6;
+    background: var(--hover-bg);
 }
 
 .data-table tbody tr.selected {
-    background: #dbeafe;
+    background: var(--primary-bg);
 }
 
 .data-table tbody tr.clickable {
@@ -1637,7 +1639,7 @@ export default {
 .data-table td {
     padding: 12px 16px;
     font-size: 0.95rem;
-    color: #374151;
+    color: var(--text-primary);
     vertical-align: middle;
 }
 
@@ -1663,7 +1665,7 @@ export default {
 }
 
 .sortable:hover {
-    background: #f3f4f6;
+    background: var(--hover-bg);
 }
 
 .column-header {
@@ -1717,17 +1719,22 @@ export default {
 
 /* Actions column */
 .actions-column {
-    width: 120px;
+    width: 160px;
+    min-width: 160px;
 }
 
 .actions-cell {
     white-space: nowrap;
+    padding: 8px 12px !important;
+    vertical-align: middle;
 }
 
 .action-buttons {
     display: flex;
     gap: 8px;
     justify-content: flex-end;
+    align-items: center;
+    flex-wrap: wrap;
 }
 
 .actions-cell .action-btn {
@@ -1735,6 +1742,88 @@ export default {
     height: 28px;
     border: none;
     background: transparent;
+}
+
+/* Text-based action buttons */
+.actions-cell .action-buttons button {
+    padding: 4px 8px;
+    font-size: 11px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.2s ease;
+    min-width: 50px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.actions-cell .action-buttons button:hover {
+    background: var(--hover-bg);
+    color: var(--text-primary);
+    border-color: var(--text-tertiary);
+}
+
+/* Specific button type styling */
+.actions-cell .action-buttons button[title*="View"],
+.actions-cell .action-buttons button:contains("View") {
+    color: #3b82f6;
+    border-color: #3b82f6;
+}
+
+.actions-cell .action-buttons button[title*="View"]:hover,
+.actions-cell .action-buttons button:contains("View"):hover {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.actions-cell .action-buttons button[title*="SMS"],
+.actions-cell .action-buttons button:contains("SMS") {
+    color: #10b981;
+    border-color: #10b981;
+}
+
+.actions-cell .action-buttons button[title*="SMS"]:hover,
+.actions-cell .action-buttons button:contains("SMS"):hover {
+    background: #d1fae5;
+    color: #047857;
+}
+
+.actions-cell .action-buttons button[title*="Transfer"],
+.actions-cell .action-buttons button:contains("Transfer") {
+    color: #f59e0b;
+    border-color: #f59e0b;
+}
+
+.actions-cell .action-buttons button[title*="Transfer"]:hover,
+.actions-cell .action-buttons button:contains("Transfer"):hover {
+    background: #fef3c7;
+    color: #d97706;
+}
+
+.actions-cell .action-buttons button[title*="Refund"],
+.actions-cell .action-buttons button:contains("Refund") {
+    color: #ef4444;
+    border-color: #ef4444;
+}
+
+.actions-cell .action-buttons button[title*="Refund"]:hover,
+.actions-cell .action-buttons button:contains("Refund"):hover {
+    background: #fee2e2;
+    color: #dc2626;
+}
+
+.actions-cell .action-buttons button[title*="Disable"],
+.actions-cell .action-buttons button:contains("Disable") {
+    color: #6b7280;
+    border-color: #6b7280;
+}
+
+.actions-cell .action-buttons button[title*="Disable"]:hover,
+.actions-cell .action-buttons button:contains("Disable"):hover {
+    background: #f3f4f6;
+    color: #374151;
 }
 
 .actions-cell .view-btn:hover {
@@ -2059,6 +2148,22 @@ export default {
         width: 90vw;
         max-width: 400px;
         margin: 0;
+    }
+
+    /* Responsive action buttons */
+    .actions-column {
+        width: 140px;
+        min-width: 140px;
+    }
+
+    .actions-cell .action-buttons {
+        gap: 4px;
+    }
+
+    .actions-cell .action-buttons button {
+        padding: 3px 6px;
+        font-size: 10px;
+        min-width: 40px;
     }
 }
 </style>

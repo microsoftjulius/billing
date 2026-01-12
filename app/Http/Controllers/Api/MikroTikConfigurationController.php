@@ -729,4 +729,3 @@ class MikroTikConfigurationController extends Controller
         return "backups/{$device->id}/{$backupId}.backup";
     }
 }
-}

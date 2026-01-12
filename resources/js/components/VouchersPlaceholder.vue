@@ -9,52 +9,69 @@
       <div class="stats-grid">
         <div class="stat-card">
           <h3>Total Vouchers</h3>
-          <div class="stat-number">5,678</div>
-          <div class="stat-change positive">+25% this month</div>
+          <div class="stat-number">{{ stats.total_vouchers || 0 }}</div>
+          <div class="stat-change positive">{{ stats.active_vouchers || 0 }} active</div>
         </div>
         <div class="stat-card">
-          <h3>Active Vouchers</h3>
-          <div class="stat-number">2,345</div>
-          <div class="stat-change positive">+18% this month</div>
+          <h3>Used Vouchers</h3>
+          <div class="stat-number">{{ stats.used_vouchers || 0 }}</div>
+          <div class="stat-change">{{ ((stats.used_vouchers || 0) / (stats.total_vouchers || 1) * 100).toFixed(1) }}% usage rate</div>
         </div>
         <div class="stat-card">
-          <h3>Used Today</h3>
-          <div class="stat-number">156</div>
-          <div class="stat-change positive">+12% vs yesterday</div>
+          <h3>Expired Vouchers</h3>
+          <div class="stat-number">{{ stats.expired_vouchers || 0 }}</div>
+          <div class="stat-change">{{ stats.unused_vouchers || 0 }} unused</div>
         </div>
         <div class="stat-card">
-          <h3>Revenue Today</h3>
-          <div class="stat-number">UGX 780K</div>
-          <div class="stat-change positive">+22% vs yesterday</div>
+          <h3>Total Revenue</h3>
+          <div class="stat-number">{{ formatCurrency(stats.total_revenue || 0) }}</div>
+          <div class="stat-change positive">{{ formatCurrency(stats.average_value || 0) }} avg</div>
         </div>
       </div>
 
       <div class="vouchers-table">
         <h2>Recent Vouchers</h2>
-        <div class="table-container">
+        <div v-if="loading" class="loading-state">
+          <p>Loading vouchers...</p>
+        </div>
+        <div v-else-if="vouchers.length === 0" class="empty-state">
+          <p>No vouchers found</p>
+        </div>
+        <div v-else class="table-container">
           <table class="data-table">
             <thead>
               <tr>
                 <th>Code</th>
-                <th>Type</th>
-                <th>Value</th>
+                <th>Profile</th>
+                <th>Duration</th>
                 <th>Status</th>
+                <th>Customer</th>
                 <th>Created</th>
-                <th>Used</th>
+                <th>Expires</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="voucher in dummyVouchers" :key="voucher.id">
+              <tr v-for="voucher in vouchers" :key="voucher.id">
                 <td><code>{{ voucher.code }}</code></td>
-                <td>{{ voucher.type }}</td>
-                <td>{{ voucher.value }}</td>
+                <td>{{ voucher.profile || 'N/A' }}</td>
+                <td>{{ voucher.validity_hours }}h</td>
                 <td>
                   <span class="status-badge" :class="voucher.status">
                     {{ voucher.status }}
                   </span>
                 </td>
-                <td>{{ voucher.created }}</td>
-                <td>{{ voucher.used || '-' }}</td>
+                <td>
+                  <div v-if="voucher.customer" class="customer-info">
+                    <div class="customer-name">{{ voucher.customer.name }}</div>
+                    <div class="customer-phone">{{ voucher.customer.phone }}</div>
+                  </div>
+                  <span v-else class="text-muted">Not assigned</span>
+                </td>
+                <td>{{ formatDate(voucher.created_at) }}</td>
+                <td>
+                  <span v-if="voucher.expires_at">{{ formatDate(voucher.expires_at) }}</span>
+                  <span v-else class="text-muted">No expiry</span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -65,46 +82,76 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import api from '@/api/client'
 
-const dummyVouchers = ref([
-  {
-    id: 1,
-    code: 'VCH-ABC123',
-    type: '1 Hour',
-    value: 'UGX 2,000',
-    status: 'active',
-    created: '2024-01-12',
-    used: null
-  },
-  {
-    id: 2,
-    code: 'VCH-DEF456',
-    type: '24 Hours',
-    value: 'UGX 5,000',
-    status: 'used',
-    created: '2024-01-11',
-    used: '2024-01-12'
-  },
-  {
-    id: 3,
-    code: 'VCH-GHI789',
-    type: '1 Week',
-    value: 'UGX 15,000',
-    status: 'active',
-    created: '2024-01-10',
-    used: null
-  },
-  {
-    id: 4,
-    code: 'VCH-JKL012',
-    type: '1 Hour',
-    value: 'UGX 2,000',
-    status: 'expired',
-    created: '2024-01-05',
-    used: null
+const vouchers = ref<any[]>([])
+const stats = ref<any>({})
+const loading = ref(false)
+
+const loadVouchers = async () => {
+  try {
+    loading.value = true
+    
+    // Load vouchers and calculate statistics from the data
+    const vouchersResponse = await api.get('/api/v1/vouchers?per_page=20')
+    
+    console.log('Vouchers API response:', vouchersResponse.data);
+    
+    // The API returns data in 'data' field, not 'vouchers'
+    vouchers.value = vouchersResponse.data.data || []
+    
+    // Calculate statistics from the voucher data
+    const totalVouchers = vouchers.value.length
+    const activeVouchers = vouchers.value.filter(v => v.status === 'active').length
+    const usedVouchers = vouchers.value.filter(v => v.status === 'used').length
+    const expiredVouchers = vouchers.value.filter(v => v.status === 'expired').length
+    const unusedVouchers = vouchers.value.filter(v => v.status === 'unused').length
+    const totalRevenue = vouchers.value.reduce((sum, v) => sum + parseFloat(v.price || 0), 0)
+    const averageValue = totalVouchers > 0 ? totalRevenue / totalVouchers : 0
+    
+    stats.value = {
+      total_vouchers: totalVouchers,
+      active_vouchers: activeVouchers,
+      used_vouchers: usedVouchers,
+      expired_vouchers: expiredVouchers,
+      unused_vouchers: unusedVouchers,
+      total_revenue: totalRevenue,
+      average_value: averageValue
+    }
+    
+    console.log('Processed vouchers data:', { vouchers: vouchers.value.length, stats: stats.value });
+  } catch (error) {
+    console.error('Failed to load vouchers:', error)
+    // Set empty data on error
+    stats.value = {}
+    vouchers.value = []
+  } finally {
+    loading.value = false
   }
-])
+}
+
+const formatCurrency = (amount: number): string => {
+  return new Intl.NumberFormat('en-UG', {
+    style: 'currency',
+    currency: 'UGX',
+    minimumFractionDigits: 0,
+  }).format(amount)
+}
+
+const formatDate = (dateString: string): string => {
+  return new Date(dateString).toLocaleDateString('en-UG', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+onMounted(() => {
+  loadVouchers()
+})
 </script>
 
 <style scoped>
@@ -158,6 +205,7 @@ const dummyVouchers = ref([
 .stat-change {
   font-size: 0.75rem;
   font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .stat-change.positive {
@@ -176,6 +224,13 @@ const dummyVouchers = ref([
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 1rem;
+}
+
+.loading-state,
+.empty-state {
+  text-align: center;
+  padding: 2rem;
+  color: var(--text-secondary);
 }
 
 .table-container {
@@ -212,6 +267,27 @@ const dummyVouchers = ref([
   font-size: 0.875rem;
 }
 
+.customer-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.customer-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.customer-phone {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.text-muted {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
 .status-badge {
   display: inline-block;
   padding: 0.25rem 0.5rem;
@@ -234,5 +310,10 @@ const dummyVouchers = ref([
 .status-badge.expired {
   background: #fee2e2;
   color: #991b1b;
+}
+
+.status-badge.unused {
+  background: #f3f4f6;
+  color: #6b7280;
 }
 </style>

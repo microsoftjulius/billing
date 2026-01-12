@@ -2,9 +2,23 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { User, Notification, Theme } from '@/types';
 
+interface Tenant {
+  id: string | number;
+  name: string;
+  subdomain: string;
+  plan: string;
+  owner: {
+    firstName: string;
+    lastName: string;
+    email: string;
+  };
+  created_at: string;
+}
+
 export const useAppStore = defineStore('app', () => {
   // State
   const user = ref<User | null>(null);
+  const tenant = ref<Tenant | null>(null);
   const theme = ref<Theme>('system');
   const notifications = ref<Notification[]>([]);
   const isLoading = ref(false);
@@ -19,16 +33,33 @@ export const useAppStore = defineStore('app', () => {
     }
     return theme.value;
   });
+  const tenantUrl = computed(() => {
+    if (tenant.value) {
+      return `https://${tenant.value.subdomain}.netbillpro.com`;
+    }
+    return null;
+  });
 
   // Actions
   const setUser = (userData: User | null) => {
     user.value = userData;
   };
 
+  const setTenant = (tenantData: Tenant | null) => {
+    tenant.value = tenantData;
+    if (tenantData) {
+      localStorage.setItem('tenant', JSON.stringify(tenantData));
+    } else {
+      localStorage.removeItem('tenant');
+    }
+  };
+
   const logout = () => {
     user.value = null;
+    tenant.value = null;
     localStorage.removeItem('auth_token');
     localStorage.removeItem('user');
+    localStorage.removeItem('tenant');
     
     // Clear axios authorization header if available
     if (typeof window !== 'undefined' && (window as any).axios) {
@@ -176,11 +207,23 @@ export const useAppStore = defineStore('app', () => {
       // Check for existing authentication
       const savedToken = localStorage.getItem('auth_token');
       const savedUser = localStorage.getItem('user');
+      const savedTenant = localStorage.getItem('tenant');
       
       if (savedToken && savedUser) {
         try {
           const userData = JSON.parse(savedUser);
           setUser(userData);
+          
+          // Load tenant data if available
+          if (savedTenant) {
+            try {
+              const tenantData = JSON.parse(savedTenant);
+              setTenant(tenantData);
+            } catch (error) {
+              console.warn('Failed to parse saved tenant data:', error);
+              localStorage.removeItem('tenant');
+            }
+          }
           
           // Set axios default authorization header if axios is available
           if (typeof window !== 'undefined' && (window as any).axios) {
@@ -191,6 +234,7 @@ export const useAppStore = defineStore('app', () => {
           // Clear invalid stored data
           localStorage.removeItem('auth_token');
           localStorage.removeItem('user');
+          localStorage.removeItem('tenant');
         }
       }
 
@@ -232,6 +276,7 @@ export const useAppStore = defineStore('app', () => {
   return {
     // State
     user,
+    tenant,
     theme,
     notifications,
     isLoading,
@@ -241,9 +286,11 @@ export const useAppStore = defineStore('app', () => {
     // Getters
     isAuthenticated,
     currentTheme,
+    tenantUrl,
     
     // Actions
     setUser,
+    setTenant,
     logout,
     setTheme,
     toggleTheme,

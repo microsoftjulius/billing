@@ -16,3 +16,9 @@ Schedule::command('mikrotik:monitor')->everyMinute()->when(function () {
     // Only run if the 30-second schedule is not available
     return !function_exists('everyThirtySeconds');
 });
+
+// Schedule voucher cleanup daily at 2 AM
+Schedule::command('vouchers:cleanup')->dailyAt('02:00');
+
+// Schedule voucher expiration processing every hour
+Schedule::job(new \App\Jobs\ProcessVoucherExpirationPolicies())->hourly();

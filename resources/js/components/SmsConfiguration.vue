@@ -205,7 +205,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import api from '@/api/index'
+import api from '@/api/client'
 
 // Reactive state
 const loading = ref(false)

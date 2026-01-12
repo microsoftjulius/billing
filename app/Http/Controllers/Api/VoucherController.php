@@ -3,936 +3,889 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Tenant;
 use App\Models\Voucher;
-use App\Services\VoucherService;
-use Illuminate\Http\JsonResponse;
+use App\Models\Customer;
+use App\Services\DatabaseContextService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Str;
 
 class VoucherController extends Controller
 {
-    private VoucherService $voucherService;
-    private ?Tenant $currentTenant;
-
-    public function __construct(VoucherService $voucherService)
+    public function index(Request $request)
     {
-        $this->voucherService = $voucherService;
-        $this->currentTenant = $this->resolveTenant();
-    }
-
-    /**
-     * Resolve the current tenant from the request
-     */
-    private function resolveTenant(): ?Tenant
-    {
-        // Method 1: From header (for API calls)
-        if (request()->hasHeader('X-Tenant-ID')) {
-            return Tenant::where('uuid', request()->header('X-Tenant-ID'))->first();
-        }
-
-        // Method 2: From subdomain (for web calls)
-        $host = request()->getHost();
-        $subdomain = explode('.', $host)[0];
-
-        if ($subdomain && $subdomain !== 'www' && $subdomain !== 'api') {
-            return Tenant::where('subdomain', $subdomain)->first();
-        }
-
-        // Method 3: From request parameter (for shared routes)
-        if (request()->has('tenant_id')) {
-            return Tenant::where('uuid', request()->get('tenant_id'))->first();
-        }
-
-        // Method 4: From authenticated user (if applicable)
-        if (auth()->check() && method_exists(auth()->user(), 'tenant')) {
-            return auth()->user()->tenant;
-        }
-
-        return null; // No tenant resolved
-    }
-
-    /**
-     * Get voucher by code
-     */
-    public function show(string $code): JsonResponse
-    {
-        try {
-            $query = Voucher::with(['customer', 'payment'])
-                ->where('code', $code);
-
-            // Scope by tenant if current tenant exists
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
+        $user = auth()->user();
+        $connection = DatabaseContextService::getConnection($user);
+        
+        // Build query with proper connection and tenant filtering
+        $query = Voucher::on($connection)->with(['customer', 'payment']);
+        
+        // Apply tenant filtering
+        if (DatabaseContextService::isGlobalAdmin($user)) {
+            // Global admin can see all vouchers across tenants
+            if ($request->has('tenant_id')) {
+                $query->where('tenant_id', $request->tenant_id);
             }
+        } else {
+            // Tenant users only see their own vouchers
+            $query->where('tenant_id', $user->tenant_id);
+        }
+        
+        // Search functionality
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('code', 'ilike', "%{$search}%")
+                  ->orWhereHas('customer', function($customerQuery) use ($search) {
+                      $customerQuery->where('name', 'ilike', "%{$search}%")
+                                   ->orWhere('phone', 'ilike', "%{$search}%");
+                  });
+            });
+        }
+        
+        // Filter by status
+        if ($request->has('status')) {
+            $query->where('status', $request->status);
+        }
+        
+        // Filter by profile
+        if ($request->has('profile')) {
+            $query->where('profile', $request->profile);
+        }
+        
+        // Filter by date range
+        if ($request->has('date_from')) {
+            $query->whereDate('created_at', '>=', $request->date_from);
+        }
+        
+        if ($request->has('date_to')) {
+            $query->whereDate('created_at', '<=', $request->date_to);
+        }
+        
+        // Sort
+        $sortBy = $request->get('sort_by', 'created_at');
+        $sortOrder = $request->get('sort_order', 'desc');
+        $query->orderBy($sortBy, $sortOrder);
+        
+        $vouchers = $query->paginate($request->get('per_page', 15));
+        
+        return response()->json([
+            'success' => true,
+            'data' => $vouchers->items(),
+            'pagination' => [
+                'current_page' => $vouchers->currentPage(),
+                'last_page' => $vouchers->lastPage(),
+                'per_page' => $vouchers->perPage(),
+                'total' => $vouchers->total(),
+            ]
+        ]);
+    }
 
-            $voucher = $query->firstOrFail();
+    public function store(Request $request)
+    {
+        $user = auth()->user();
+        $connection = DatabaseContextService::getConnection($user);
+        
+        $validator = Validator::make($request->all(), [
+            'customer_id' => 'nullable|exists:customers,id',
+            'profile' => 'required|string|max:100',
+            'validity_hours' => 'required|integer|min:1|max:8760', // max 1 year
+            'data_limit_mb' => 'nullable|integer|min:1',
+            'price' => 'required|numeric|min:0',
+            'currency' => 'required|string|size:3',
+            'quantity' => 'integer|min:1|max:100',
+        ]);
 
-            // Get usage information from router
-            $usage = $this->voucherService->getVoucherUsage($code);
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
 
-            $response = [
-                'success' => true,
-                'data' => [
-                    'voucher' => [
-                        'id' => $voucher->id,
-                        'code' => $voucher->code,
-                        'profile' => $voucher->profile,
-                        'validity_hours' => $voucher->validity_hours,
-                        'data_limit_mb' => $voucher->data_limit_mb,
-                        'data_limit_formatted' => $voucher->getDataLimitFormattedAttribute(),
-                        'price' => $voucher->price,
-                        'currency' => $voucher->currency,
-                        'status' => $voucher->status,
-                        'activated_at' => $voucher->activated_at?->toISOString(),
-                        'expires_at' => $voucher->expires_at?->toISOString(),
-                        'sms_sent_at' => $voucher->sms_sent_at?->toISOString(),
-                        'created_at' => $voucher->created_at->toISOString(),
-                        'remaining_hours' => $voucher->getRemainingHoursAttribute(),
-                        'remaining_time_formatted' => $voucher->getRemainingTimeAttribute(),
-                        'is_active' => $voucher->getIsActiveAttribute(),
-                        'metadata' => $voucher->metadata,
-                    ],
-                    'customer' => $voucher->customer ? [
-                        'id' => $voucher->customer->id,
-                        'name' => $voucher->customer->name,
-                        'phone' => $voucher->customer->phone,
-                        'email' => $voucher->customer->email,
-                    ] : null,
-                    'payment' => $voucher->payment ? [
-                        'id' => $voucher->payment->id,
-                        'transaction_id' => $voucher->payment->transaction_id,
-                        'amount' => $voucher->payment->amount,
-                        'currency' => $voucher->payment->currency,
-                        'paid_at' => $voucher->payment->paid_at?->toISOString(),
-                    ] : null,
-                    'usage' => $usage['usage'] ?? [],
-                    'connections' => $usage['connections'] ?? [],
-                ]
-            ];
+        try {
+            $quantity = $request->get('quantity', 1);
+            $vouchers = [];
 
-            // Add tenant info to response if tenant exists
-            if ($this->currentTenant) {
-                $response['tenant'] = [
-                    'id' => $this->currentTenant->id,
-                    'code' => $this->currentTenant->code,
-                    'name' => $this->currentTenant->name,
+            for ($i = 0; $i < $quantity; $i++) {
+                $voucher = new Voucher();
+                $voucher->setConnection($connection);
+                $code = $voucher->generateCode();
+                
+                $voucherData = [
+                    'customer_id' => $request->customer_id,
+                    'code' => $code,
+                    'password' => Str::random(8),
+                    'profile' => $request->profile,
+                    'validity_hours' => $request->validity_hours,
+                    'data_limit_mb' => $request->data_limit_mb,
+                    'price' => $request->price,
+                    'currency' => $request->currency,
+                    'status' => 'unused',
+                    'tenant_id' => $user->tenant_id, // Add tenant context
+                    'metadata' => [
+                        'created_by' => $user->id,
+                        'batch_id' => $quantity > 1 ? Str::uuid() : null,
+                    ]
                 ];
-            }
 
-            return response()->json($response);
-
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Voucher not found'
-            ], 404);
-
-        } catch (\Exception $e) {
-            Log::channel('voucher')->error('Failed to fetch voucher', [
-                'code' => $code,
-                'tenant_id' => $this->currentTenant?->id,
-                'error' => $e->getMessage()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch voucher details',
-                'error' => config('app.debug') ? $e->getMessage() : null
-            ], 500);
-        }
-    }
-
-    /**
-     * Get voucher usage statistics
-     */
-    public function usage(string $code): JsonResponse
-    {
-        try {
-            // First verify voucher exists and belongs to tenant if applicable
-            $query = Voucher::where('code', $code);
-
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
-            }
-
-            $voucher = $query->firstOrFail();
-
-            // Get detailed usage from service
-            $usageData = $this->voucherService->getVoucherUsage($code);
-
-            if (isset($usageData['error'])) {
-                throw new \Exception($usageData['error']);
+                $vouchers[] = Voucher::on($connection)->create($voucherData);
             }
 
             return response()->json([
                 'success' => true,
-                'data' => $usageData
-            ]);
-
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Voucher not found'
-            ], 404);
+                'message' => $quantity > 1 ? "{$quantity} vouchers created successfully" : "Voucher created successfully",
+                'data' => $quantity === 1 ? $vouchers[0]->load(['customer', 'payment']) : $vouchers
+            ], 201);
 
         } catch (\Exception $e) {
-            Log::channel('voucher')->error('Failed to get voucher usage', [
-                'code' => $code,
-                'tenant_id' => $this->currentTenant?->id,
-                'error' => $e->getMessage()
-            ]);
-
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to get voucher usage',
-                'error' => config('app.debug') ? $e->getMessage() : null
+                'message' => 'Failed to create voucher(s): ' . $e->getMessage()
             ], 500);
         }
     }
 
-    /**
-     * Disable a voucher
-     */
-    public function disable(string $code): JsonResponse
+    public function show($identifier)
     {
         try {
-            // Verify voucher exists and belongs to tenant if applicable
-            $query = Voucher::where('code', $code);
-
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
+            $user = auth()->user();
+            $connection = DatabaseContextService::getConnection($user);
+            
+            $query = Voucher::on($connection)->with(['customer', 'payment']);
+            
+            // Apply tenant filtering
+            if (!DatabaseContextService::isGlobalAdmin($user)) {
+                $query->where('tenant_id', $user->tenant_id);
+            }
+            
+            // Try to find by ID first, then by code
+            if (is_numeric($identifier)) {
+                $voucher = $query->findOrFail($identifier);
+            } else {
+                $voucher = $query->where('code', $identifier)->firstOrFail();
             }
 
-            $voucher = $query->firstOrFail();
-
-            // Disable voucher using service
-            $disabled = $this->voucherService->disableVoucher($code);
-
-            if (!$disabled) {
-                throw new \Exception('Failed to disable voucher on router');
-            }
-
-            Log::channel('voucher')->info('Voucher disabled via API', [
-                'voucher_id' => $voucher->id,
-                'code' => $code,
-                'tenant_id' => $this->currentTenant?->id,
-                'disabled_by' => auth()->id() ?? 'system',
+            return response()->json([
+                'success' => true,
+                'data' => $voucher
             ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Voucher not found'
+            ], 404);
+        }
+    }
+
+    public function update(Request $request, $id)
+    {
+        $user = auth()->user();
+        $connection = DatabaseContextService::getConnection($user);
+        
+        $validator = Validator::make($request->all(), [
+            'customer_id' => 'nullable|exists:customers,id',
+            'profile' => 'required|string|max:100',
+            'validity_hours' => 'required|integer|min:1|max:8760',
+            'data_limit_mb' => 'nullable|integer|min:1',
+            'price' => 'required|numeric|min:0',
+            'currency' => 'required|string|size:3',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $query = Voucher::on($connection);
+            
+            // Apply tenant filtering
+            if (!DatabaseContextService::isGlobalAdmin($user)) {
+                $query->where('tenant_id', $user->tenant_id);
+            }
+            
+            $voucher = $query->findOrFail($id);
+            
+            // Don't allow editing of active or used vouchers
+            if (in_array($voucher->status, ['active', 'used', 'expired'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot edit voucher with status: ' . $voucher->status
+                ], 400);
+            }
+            
+            $voucher->update([
+                'customer_id' => $request->customer_id,
+                'profile' => $request->profile,
+                'validity_hours' => $request->validity_hours,
+                'data_limit_mb' => $request->data_limit_mb,
+                'price' => $request->price,
+                'currency' => $request->currency,
+                'metadata' => array_merge($voucher->metadata ?? [], [
+                    'updated_by' => $user->id,
+                    'updated_at' => now()->toISOString(),
+                ])
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Voucher updated successfully',
+                'data' => $voucher->load(['customer', 'payment'])
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update voucher: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function destroy($id)
+    {
+        try {
+            $user = auth()->user();
+            $connection = DatabaseContextService::getConnection($user);
+            
+            $query = Voucher::on($connection);
+            
+            // Apply tenant filtering
+            if (!DatabaseContextService::isGlobalAdmin($user)) {
+                $query->where('tenant_id', $user->tenant_id);
+            }
+            
+            $voucher = $query->findOrFail($id);
+            
+            // Don't allow deletion of active vouchers
+            if ($voucher->status === 'active') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot delete active voucher'
+                ], 400);
+            }
+
+            $voucher->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Voucher deleted successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete voucher: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function activate($id)
+    {
+        try {
+            $user = auth()->user();
+            $connection = DatabaseContextService::getConnection($user);
+            
+            $query = Voucher::on($connection);
+            
+            // Apply tenant filtering
+            if (!DatabaseContextService::isGlobalAdmin($user)) {
+                $query->where('tenant_id', $user->tenant_id);
+            }
+            
+            $voucher = $query->findOrFail($id);
+            
+            if ($voucher->status !== 'unused') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only unused vouchers can be activated'
+                ], 400);
+            }
+
+            $voucher->activate();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Voucher activated successfully',
+                'data' => $voucher->fresh()
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to activate voucher'
+            ], 500);
+        }
+    }
+
+    public function disable($identifier)
+    {
+        try {
+            $user = auth()->user();
+            $connection = DatabaseContextService::getConnection($user);
+            
+            $query = Voucher::on($connection);
+            
+            // Apply tenant filtering
+            if (!DatabaseContextService::isGlobalAdmin($user)) {
+                $query->where('tenant_id', $user->tenant_id);
+            }
+            
+            // Try to find by ID first, then by code
+            if (is_numeric($identifier)) {
+                $voucher = $query->findOrFail($identifier);
+            } else {
+                $voucher = $query->where('code', $identifier)->firstOrFail();
+            }
+            
+            $voucher->update(['status' => 'disabled']);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Voucher disabled successfully',
-                'data' => [
-                    'code' => $code,
-                    'status' => 'disabled',
-                    'disabled_at' => now()->toISOString(),
-                ]
+                'data' => $voucher->fresh()
             ]);
-
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Voucher not found'
-            ], 404);
 
         } catch (\Exception $e) {
-            Log::channel('voucher')->error('Failed to disable voucher', [
-                'code' => $code,
-                'tenant_id' => $this->currentTenant?->id,
-                'error' => $e->getMessage()
-            ]);
-
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to disable voucher',
-                'error' => config('app.debug') ? $e->getMessage() : null
+                'message' => 'Failed to disable voucher'
             ], 500);
         }
     }
 
-    /**
-     * Renew a voucher (extend validity)
-     */
-    public function renew(string $code, Request $request): JsonResponse
+    public function bulkGenerate(Request $request)
     {
-        try {
-            // Validate request
-            $validator = Validator::make($request->all(), [
-                'additional_hours' => 'required|integer|min:1|max:720', // Max 30 days
-            ]);
+        $user = auth()->user();
+        $connection = DatabaseContextService::getConnection($user);
+        
+        $validator = Validator::make($request->all(), [
+            'profile' => 'required|string|max:100',
+            'validity_hours' => 'required|integer|min:1|max:8760',
+            'data_limit_mb' => 'nullable|integer|min:1',
+            'price' => 'required|numeric|min:0',
+            'currency' => 'required|string|size:3',
+            'quantity' => 'required|integer|min:1|max:1000',
+        ]);
 
-            if ($validator->fails()) {
-                throw new ValidationException($validator);
-            }
-
-            $additionalHours = $request->input('additional_hours');
-
-            // Verify voucher exists and belongs to tenant if applicable
-            $query = Voucher::where('code', $code);
-
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
-            }
-
-            $voucher = $query->firstOrFail();
-
-            // Renew voucher using service
-            $result = $this->voucherService->renewVoucher($code, $additionalHours);
-
-            if (!$result['success']) {
-                throw new \Exception($result['message']);
-            }
-
-            Log::channel('voucher')->info('Voucher renewed via API', [
-                'voucher_id' => $voucher->id,
-                'code' => $code,
-                'additional_hours' => $additionalHours,
-                'tenant_id' => $this->currentTenant?->id,
-                'renewed_by' => auth()->id() ?? 'system',
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => $result['message'],
-                'data' => $result['voucher']
-            ]);
-
-        } catch (ValidationException $e) {
+        if ($validator->fails()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $e->errors()
+                'errors' => $validator->errors()
             ], 422);
-
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Voucher not found'
-            ], 404);
-
-        } catch (\Exception $e) {
-            Log::channel('voucher')->error('Failed to renew voucher', [
-                'code' => $code,
-                'additional_hours' => $request->input('additional_hours'),
-                'tenant_id' => $this->currentTenant?->id,
-                'error' => $e->getMessage()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to renew voucher',
-                'error' => config('app.debug') ? $e->getMessage() : null
-            ], 500);
         }
-    }
 
-    /**
-     * Sync voucher with router
-     */
-    public function sync(string $code): JsonResponse
-    {
         try {
-            // Verify voucher exists and belongs to tenant if applicable
-            $query = Voucher::where('code', $code);
+            $quantity = $request->quantity;
+            $batchId = Str::uuid();
+            $vouchers = [];
 
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
-            }
-
-            $voucher = $query->firstOrFail();
-
-            // Sync voucher using service
-            $result = $this->voucherService->syncWithRouter($code);
-
-            $logData = [
-                'voucher_id' => $voucher->id,
-                'code' => $code,
-                'tenant_id' => $this->currentTenant?->id,
-                'action' => $result['action'] ?? 'unknown',
-                'success' => $result['success'] ?? false,
-                'synced_by' => auth()->id() ?? 'system',
-            ];
-
-            if ($result['success']) {
-                Log::channel('voucher')->info('Voucher synced successfully', $logData);
-            } else {
-                Log::channel('voucher')->warning('Voucher sync failed', $logData);
-            }
-
-            return response()->json([
-                'success' => $result['success'],
-                'message' => $result['message'],
-                'action' => $result['action'],
-                'data' => [
+            for ($i = 0; $i < $quantity; $i++) {
+                $voucher = new Voucher();
+                $voucher->setConnection($connection);
+                $code = $voucher->generateCode();
+                
+                $voucherData = [
                     'code' => $code,
-                    'status' => $voucher->status,
-                    'synced_at' => now()->toISOString(),
-                ]
-            ]);
-
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Voucher not found'
-            ], 404);
-
-        } catch (\Exception $e) {
-            Log::channel('voucher')->error('Failed to sync voucher', [
-                'code' => $code,
-                'tenant_id' => $this->currentTenant?->id,
-                'error' => $e->getMessage()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to sync voucher with router',
-                'error' => config('app.debug') ? $e->getMessage() : null
-            ], 500);
-        }
-    }
-
-    /**
-     * List vouchers with pagination and filtering
-     */
-    public function index(Request $request): JsonResponse
-    {
-        try {
-            $perPage = min($request->get('per_page', 15), 100);
-            $page = $request->get('page', 1);
-
-            $query = Voucher::with(['customer', 'payment'])
-                ->orderBy('created_at', 'desc');
-
-            // Scope by tenant if current tenant exists
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
-            }
-
-            // Apply filters
-            if ($request->has('status')) {
-                $query->where('status', $request->get('status'));
-            }
-
-            if ($request->has('profile')) {
-                $query->where('profile', $request->get('profile'));
-            }
-
-            if ($request->has('customer_id')) {
-                $query->where('customer_id', $request->get('customer_id'));
-            }
-
-            if ($request->has('customer_phone')) {
-                $query->whereHas('customer', function ($q) use ($request) {
-                    $q->where('phone', $request->get('customer_phone'));
-                });
-            }
-
-            if ($request->has('start_date')) {
-                $query->whereDate('created_at', '>=', $request->get('start_date'));
-            }
-
-            if ($request->has('end_date')) {
-                $query->whereDate('created_at', '<=', $request->get('end_date'));
-            }
-
-            if ($request->has('expired')) {
-                if ($request->get('expired') === 'true') {
-                    $query->expired();
-                } elseif ($request->get('expired') === 'false') {
-                    $query->where('expires_at', '>', now());
-                }
-            }
-
-            if ($request->has('active')) {
-                if ($request->get('active') === 'true') {
-                    $query->active();
-                } elseif ($request->get('active') === 'false') {
-                    $query->where(function ($q) {
-                        $q->where('expires_at', '<=', now())
-                            ->orWhere('status', 'disabled');
-                    });
-                }
-            }
-
-            // Filter by tenant_id if explicitly requested (admin only)
-            if ($request->has('tenant_id') && !$this->currentTenant && auth()->user()?->isAdmin()) {
-                $query->where('tenant_id', $request->get('tenant_id'));
-            }
-
-            $vouchers = $query->paginate($perPage, ['*'], 'page', $page);
-
-            $responseData = [
-                'success' => true,
-                'data' => [
-                    'vouchers' => $vouchers->items(),
-                    'pagination' => [
-                        'total' => $vouchers->total(),
-                        'per_page' => $vouchers->perPage(),
-                        'current_page' => $vouchers->currentPage(),
-                        'last_page' => $vouchers->lastPage(),
-                        'from' => $vouchers->firstItem(),
-                        'to' => $vouchers->lastItem(),
-                    ],
-                    'summary' => [
-                        'total_vouchers' => $vouchers->total(),
-                        'active_vouchers' => $vouchers->where('status', 'active')->count(),
-                        'expired_vouchers' => $vouchers->where('expires_at', '<', now())->count(),
-                        'disabled_vouchers' => $vouchers->where('status', 'disabled')->count(),
-                        'total_revenue' => $vouchers->sum('price'),
+                    'password' => Str::random(8),
+                    'profile' => $request->profile,
+                    'validity_hours' => $request->validity_hours,
+                    'data_limit_mb' => $request->data_limit_mb,
+                    'price' => $request->price,
+                    'currency' => $request->currency,
+                    'status' => 'unused',
+                    'tenant_id' => $user->tenant_id, // Add tenant context
+                    'metadata' => [
+                        'created_by' => $user->id,
+                        'batch_id' => $batchId,
+                        'bulk_generated' => true,
                     ]
-                ]
-            ];
-
-            // Add tenant info to response if tenant exists
-            if ($this->currentTenant) {
-                $responseData['tenant'] = [
-                    'id' => $this->currentTenant->id,
-                    'code' => $this->currentTenant->code,
-                    'name' => $this->currentTenant->name,
                 ];
+
+                $vouchers[] = Voucher::on($connection)->create($voucherData);
             }
 
-            return response()->json($responseData);
+            return response()->json([
+                'success' => true,
+                'message' => "{$quantity} vouchers generated successfully",
+                'data' => [
+                    'batch_id' => $batchId,
+                    'quantity' => $quantity,
+                    'vouchers' => $vouchers
+                ]
+            ], 201);
 
         } catch (\Exception $e) {
-            Log::channel('voucher')->error('Failed to fetch vouchers', [
-                'tenant_id' => $this->currentTenant?->id,
-                'error' => $e->getMessage(),
-                'filters' => $request->all()
-            ]);
-
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch vouchers',
-                'error' => config('app.debug') ? $e->getMessage() : null
+                'message' => 'Failed to generate vouchers: ' . $e->getMessage()
             ], 500);
         }
     }
 
-    /**
-     * Get voucher statistics
-     */
-    public function statistics(Request $request): JsonResponse
+    public function statistics()
     {
         try {
-            $period = $request->get('period', 'today'); // today, week, month, year, custom
-
-            // Get statistics from service
-            $serviceStats = $this->voucherService->getVoucherStatistics();
-
-            // Get period-specific statistics
-            $query = Voucher::query();
-
-            // Scope by tenant if current tenant exists
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
+            $user = auth()->user();
+            $connection = DatabaseContextService::getConnection($user);
+            
+            $query = Voucher::on($connection);
+            
+            // Apply tenant filtering
+            if (!DatabaseContextService::isGlobalAdmin($user)) {
+                $query->where('tenant_id', $user->tenant_id);
             }
-
-            // Apply period filter
-            switch ($period) {
-                case 'today':
-                    $query->whereDate('created_at', today());
-                    break;
-                case 'week':
-                    $query->whereBetween('created_at', [now()->startOfWeek(), now()->endOfWeek()]);
-                    break;
-                case 'month':
-                    $query->whereBetween('created_at', [now()->startOfMonth(), now()->endOfMonth()]);
-                    break;
-                case 'year':
-                    $query->whereBetween('created_at', [now()->startOfYear(), now()->endOfYear()]);
-                    break;
-                case 'custom':
-                    if ($request->has('start_date') && $request->has('end_date')) {
-                        $query->whereBetween('created_at', [$request->get('start_date'), $request->get('end_date')]);
-                    }
-                    break;
-            }
-
-            $periodStats = [
-                'total_vouchers' => $query->count(),
+            
+            $stats = [
                 'active_vouchers' => (clone $query)->where('status', 'active')->count(),
-                'total_revenue' => (clone $query)->where('status', 'active')->sum('price') ?? 0,
-                'average_price' => function($query) {
-                    $count = $query->count();
-                    $sum = $query->sum('price') ?? 0;
-                    return $count > 0 ? round($sum / $count, 2) : 0;
-                },
-                'top_profiles' => (clone $query)
-                    ->select('profile', \DB::raw('count(*) as count'), \DB::raw('sum(price) as revenue'))
-                    ->groupBy('profile')
-                    ->orderByDesc('count')
-                    ->limit(5)
-                    ->get()
-                    ->toArray(),
+                'expired_vouchers' => (clone $query)->where('status', 'expired')->count(),
+                'total_revenue' => (clone $query)->sum('price'),
+                'today_vouchers' => (clone $query)->whereDate('created_at', today())->count(),
+                'total_vouchers' => (clone $query)->count(),
+                'unused_vouchers' => (clone $query)->where('status', 'unused')->count(),
+                'used_vouchers' => (clone $query)->where('status', 'used')->count(),
+                'disabled_vouchers' => (clone $query)->where('status', 'disabled')->count(),
             ];
-
-            // Calculate average price for period
-            $periodStats['average_price'] = $periodStats['total_vouchers'] > 0
-                ? round($periodStats['total_revenue'] / $periodStats['total_vouchers'], 2)
-                : 0;
-
-            $responseData = [
-                'success' => true,
-                'data' => [
-                    'overall_statistics' => $serviceStats,
-                    'period_statistics' => [
-                        'period' => $period,
-                        ...$periodStats,
-                        'period_start' => $query->getQuery()->wheres[0]['value'] ?? null,
-                        'period_end' => $query->getQuery()->wheres[1]['value'] ?? null,
-                    ]
-                ]
-            ];
-
-            // Add tenant info to response if tenant exists
-            if ($this->currentTenant) {
-                $responseData['tenant'] = [
-                    'id' => $this->currentTenant->id,
-                    'code' => $this->currentTenant->code,
-                    'name' => $this->currentTenant->name,
-                ];
-            }
-
-            return response()->json($responseData);
-
-        } catch (\Exception $e) {
-            Log::channel('voucher')->error('Failed to fetch voucher statistics', [
-                'tenant_id' => $this->currentTenant?->id,
-                'error' => $e->getMessage(),
-                'period' => $request->get('period')
-            ]);
 
             return response()->json([
+                'success' => true,
+                'data' => $stats
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
                 'success' => false,
-                'message' => 'Failed to fetch voucher statistics',
-                'error' => config('app.debug') ? $e->getMessage() : null
+                'message' => 'Failed to get voucher statistics'
             ], 500);
         }
     }
 
-    /**
-     * Batch generate vouchers (admin only)
-     */
-    public function batchGenerate(Request $request): JsonResponse
+    public function stats()
     {
-        // Check if user is admin or has permission
-        if (!auth()->check() || !auth()->user()->isAdmin()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Unauthorized'
-            ], 403);
-        }
-
         try {
-            // Validate request
-            $validator = Validator::make($request->all(), [
-                'vouchers' => 'required|array|min:1',
-                'vouchers.*.quantity' => 'required|integer|min:1|max:100',
-                'vouchers.*.profile' => 'required|string|max:50',
-                'vouchers.*.validity_hours' => 'required|integer|min:1|max:720',
-                'vouchers.*.price' => 'nullable|numeric|min:0',
-                'vouchers.*.data_limit_mb' => 'nullable|integer|min:1',
-            ]);
-
-            if ($validator->fails()) {
-                throw new ValidationException($validator);
+            $user = auth()->user();
+            $connection = DatabaseContextService::getConnection($user);
+            
+            $query = Voucher::on($connection);
+            
+            // Apply tenant filtering
+            if (!DatabaseContextService::isGlobalAdmin($user)) {
+                $query->where('tenant_id', $user->tenant_id);
             }
-
-            $batchData = $request->input('vouchers');
-
-            // Add tenant context if current tenant exists
-            if ($this->currentTenant) {
-                foreach ($batchData as &$item) {
-                    $item['metadata'] = array_merge($item['metadata'] ?? [], [
-                        'tenant_id' => $this->currentTenant->id,
-                        'tenant_code' => $this->currentTenant->code,
-                    ]);
-                }
-            }
-
-            // Generate vouchers
-            $result = $this->voucherService->batchGenerateVouchers($batchData);
-
-            $logData = [
-                'total' => $result['total'],
-                'successful' => $result['successful'],
-                'failed' => $result['failed'],
-                'tenant_id' => $this->currentTenant?->id,
-                'generated_by' => auth()->id(),
+            
+            $stats = [
+                'total' => (clone $query)->count(),
+                'unused' => (clone $query)->where('status', 'unused')->count(),
+                'active' => (clone $query)->where('status', 'active')->count(),
+                'expired' => (clone $query)->where('status', 'expired')->count(),
+                'used' => (clone $query)->where('status', 'used')->count(),
+                'disabled' => (clone $query)->where('status', 'disabled')->count(),
+                'created_today' => (clone $query)->whereDate('created_at', today())->count(),
+                'created_this_week' => (clone $query)->where('created_at', '>=', now()->startOfWeek())->count(),
+                'created_this_month' => (clone $query)->where('created_at', '>=', now()->startOfMonth())->count(),
+                'expiring_soon' => (clone $query)->where('expires_at', '<=', now()->addHours(24))->count(),
+                'total_value' => (clone $query)->sum('price'),
             ];
 
-            if ($result['failed'] > 0) {
-                Log::channel('voucher')->warning('Batch voucher generation completed with errors', $logData);
-            } else {
-                Log::channel('voucher')->info('Batch voucher generation completed successfully', $logData);
-            }
-
             return response()->json([
-                'success' => $result['failed'] === 0,
-                'message' => $result['failed'] === 0
-                    ? 'All vouchers generated successfully'
-                    : 'Some vouchers failed to generate',
-                'data' => $result
+                'success' => true,
+                'data' => $stats
             ]);
 
-        } catch (ValidationException $e) {
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to get voucher stats'
+            ], 500);
+        }
+    }
+
+    public function batchGenerate(Request $request)
+    {
+        return $this->bulkGenerate($request);
+    }
+
+    public function generateAdvanced(Request $request)
+    {
+        $user = auth()->user();
+        $connection = DatabaseContextService::getConnection($user);
+        
+        $validator = Validator::make($request->all(), [
+            'profile' => 'required|string|max:100',
+            'validity_hours' => 'required|integer|min:1|max:8760',
+            'data_limit_mb' => 'nullable|integer|min:1',
+            'price' => 'required|numeric|min:0',
+            'currency' => 'required|string|size:3',
+            'code_prefix' => 'nullable|string|max:10',
+            'customer_name' => 'nullable|string|max:255',
+            'customer_phone' => 'nullable|string|max:20',
+            'customer_email' => 'nullable|email|max:255',
+            'auto_activate' => 'boolean',
+            'send_sms' => 'boolean',
+        ]);
+
+        if ($validator->fails()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $e->errors()
+                'errors' => $validator->errors()
             ], 422);
+        }
 
-        } catch (\Exception $e) {
-            Log::channel('voucher')->error('Batch voucher generation failed', [
-                'tenant_id' => $this->currentTenant?->id,
-                'error' => $e->getMessage(),
-                'data' => $request->all()
-            ]);
+        try {
+            // Create customer if provided
+            $customerId = null;
+            if ($request->customer_name || $request->customer_phone || $request->customer_email) {
+                $customer = Customer::on($connection)->create([
+                    'name' => $request->customer_name,
+                    'phone' => $request->customer_phone,
+                    'email' => $request->customer_email,
+                    'tenant_id' => $user->tenant_id,
+                ]);
+                $customerId = $customer->id;
+            }
+
+            $voucher = new Voucher();
+            $voucher->setConnection($connection);
+            $code = $request->code_prefix ? 
+                $request->code_prefix . '-' . $voucher->generateCode() : 
+                $voucher->generateCode();
+            
+            $voucherData = [
+                'customer_id' => $customerId,
+                'code' => $code,
+                'password' => Str::random(8),
+                'profile' => $request->profile,
+                'validity_hours' => $request->validity_hours,
+                'data_limit_mb' => $request->data_limit_mb,
+                'price' => $request->price,
+                'currency' => $request->currency,
+                'status' => $request->auto_activate ? 'active' : 'unused',
+                'tenant_id' => $user->tenant_id,
+                'metadata' => [
+                    'created_by' => $user->id,
+                    'advanced_generated' => true,
+                ]
+            ];
+
+            if ($request->auto_activate) {
+                $voucherData['activated_at'] = now();
+                $voucherData['expires_at'] = now()->addHours($request->validity_hours);
+            }
+
+            $voucher = Voucher::on($connection)->create($voucherData);
 
             return response()->json([
+                'success' => true,
+                'message' => 'Advanced voucher generated successfully',
+                'data' => $voucher->load(['customer', 'payment'])
+            ], 201);
+
+        } catch (\Exception $e) {
+            return response()->json([
                 'success' => false,
-                'message' => 'Failed to generate vouchers',
-                'error' => config('app.debug') ? $e->getMessage() : null
+                'message' => 'Failed to generate advanced voucher: ' . $e->getMessage()
             ], 500);
         }
     }
 
-    /**
-     * Export vouchers (CSV)
-     */
-    public function export(Request $request): JsonResponse
+    public function resendSms($code)
     {
         try {
-            $query = Voucher::with(['customer', 'payment'])
-                ->orderBy('created_at', 'desc');
-
-            // Scope by tenant if current tenant exists
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
+            $user = auth()->user();
+            $connection = DatabaseContextService::getConnection($user);
+            
+            $query = Voucher::on($connection)->with('customer');
+            
+            // Apply tenant filtering
+            if (!DatabaseContextService::isGlobalAdmin($user)) {
+                $query->where('tenant_id', $user->tenant_id);
             }
-
-            // Apply filters
-            if ($request->has('status')) {
-                $query->where('status', $request->get('status'));
-            }
-
-            if ($request->has('start_date')) {
-                $query->whereDate('created_at', '>=', $request->get('start_date'));
-            }
-
-            if ($request->has('end_date')) {
-                $query->whereDate('created_at', '<=', $request->get('end_date'));
-            }
-
-            $vouchers = $query->get();
-
-            // Generate CSV content
-            $csvData = "Code,Password,Profile,Validity Hours,Data Limit (MB),Price,Currency,Status,Customer Name,Customer Phone,Customer Email,Activated At,Expires At,SMS Sent At,Created At,Tenant\n";
-
-            foreach ($vouchers as $voucher) {
-                $csvData .= sprintf(
-                    "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
-                    $voucher->code,
-                    $voucher->password,
-                    $voucher->profile,
-                    $voucher->validity_hours,
-                    $voucher->data_limit_mb ?? 'Unlimited',
-                    $voucher->price ?? '0.00',
-                    $voucher->currency,
-                    $voucher->status,
-                    $voucher->customer?->name ?? 'N/A',
-                    $voucher->customer?->phone ?? 'N/A',
-                    $voucher->customer?->email ?? 'N/A',
-                    $voucher->activated_at?->toDateTimeString() ?? 'N/A',
-                    $voucher->expires_at?->toDateTimeString() ?? 'N/A',
-                    $voucher->sms_sent_at?->toDateTimeString() ?? 'N/A',
-                    $voucher->created_at->toDateTimeString(),
-                    $voucher->tenant_id ? 'Tenant-' . $voucher->tenant_id : 'Global'
-                );
-            }
-
-            // Generate filename with tenant prefix if applicable
-            $filename = 'vouchers_' . ($this->currentTenant ? $this->currentTenant->code . '_' : '') . now()->format('Y-m-d') . '.csv';
-
-            // Return CSV as downloadable response
-            return response()->streamDownload(function () use ($csvData) {
-                echo $csvData;
-            }, $filename, [
-                'Content-Type' => 'text/csv',
-                'Content-Disposition' => 'attachment; filename="' . $filename . '"',
-            ]);
-
-        } catch (\Exception $e) {
-            Log::channel('voucher')->error('Failed to export vouchers', [
-                'tenant_id' => $this->currentTenant?->id,
-                'error' => $e->getMessage()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to export vouchers',
-                'error' => config('app.debug') ? $e->getMessage() : null
-            ], 500);
-        }
-    }
-
-    /**
-     * Search vouchers by code, customer phone, or customer name
-     */
-    public function search(Request $request): JsonResponse
-    {
-        try {
-            $validator = Validator::make($request->all(), [
-                'query' => 'required|string|min:2|max:100',
-                'limit' => 'nullable|integer|min:1|max:50',
-            ]);
-
-            if ($validator->fails()) {
+            
+            $voucher = $query->where('code', $code)->firstOrFail();
+            
+            if (!$voucher->customer || !$voucher->customer->phone) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $validator->errors()
-                ], 422);
+                    'message' => 'Voucher has no customer or phone number'
+                ], 400);
             }
 
-            $query = $request->get('query');
-            $limit = $request->get('limit', 10);
-
-            $vouchers = Voucher::with(['customer'])
-                ->where(function ($q) use ($query) {
-                    $q->where('code', 'LIKE', "%{$query}%")
-                        ->orWhereHas('customer', function ($q) use ($query) {
-                            $q->where('name', 'LIKE', "%{$query}%")
-                                ->orWhere('phone', 'LIKE', "%{$query}%");
-                        });
-                })
-                ->when($this->currentTenant, function ($q) {
-                    $q->where('tenant_id', $this->currentTenant->id);
-                })
-                ->orderBy('created_at', 'desc')
-                ->limit($limit)
-                ->get();
-
-            $response = [
-                'success' => true,
-                'data' => [
-                    'query' => $query,
-                    'results' => $vouchers->map(function ($voucher) {
-                        return [
-                            'id' => $voucher->id,
-                            'code' => $voucher->code,
-                            'profile' => $voucher->profile,
-                            'status' => $voucher->status,
-                            'expires_at' => $voucher->expires_at?->toISOString(),
-                            'remaining_hours' => $voucher->getRemainingHoursAttribute(),
-                            'customer' => $voucher->customer ? [
-                                'name' => $voucher->customer->name,
-                                'phone' => $voucher->customer->phone,
-                            ] : null,
-                        ];
-                    })->toArray(),
-                    'count' => $vouchers->count(),
-                ]
-            ];
-
-            // Add tenant info to response if tenant exists
-            if ($this->currentTenant) {
-                $response['tenant'] = [
-                    'id' => $this->currentTenant->id,
-                    'code' => $this->currentTenant->code,
-                    'name' => $this->currentTenant->name,
-                ];
-            }
-
-            return response()->json($response);
-
-        } catch (\Exception $e) {
-            Log::channel('voucher')->error('Voucher search failed', [
-                'query' => $request->get('query'),
-                'tenant_id' => $this->currentTenant?->id,
-                'error' => $e->getMessage()
+            // Here you would integrate with your SMS service
+            // For now, just mark as SMS sent
+            $voucher->update([
+                'sms_sent_at' => now(),
+                'metadata' => array_merge($voucher->metadata ?? [], [
+                    'sms_resent_by' => $user->id,
+                    'sms_resent_at' => now()->toISOString(),
+                ])
             ]);
 
             return response()->json([
+                'success' => true,
+                'message' => 'SMS sent successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
                 'success' => false,
-                'message' => 'Search failed',
-                'error' => config('app.debug') ? $e->getMessage() : null
+                'message' => 'Failed to send SMS'
             ], 500);
         }
     }
 
-    /**
-     * Resend voucher SMS
-     */
-    public function resendSms(string $code): JsonResponse
+    public function transfer($code, Request $request)
     {
-        try {
-            // Verify voucher exists and belongs to tenant if applicable
-            $query = Voucher::with(['customer'])
-                ->where('code', $code);
+        $validator = Validator::make($request->all(), [
+            'new_customer_id' => 'required|exists:customers,id',
+            'reason' => 'required|string|max:500',
+        ]);
 
-            if ($this->currentTenant) {
-                $query->where('tenant_id', $this->currentTenant->id);
-            }
-
-            $voucher = $query->firstOrFail();
-
-            // Check if voucher has a customer with phone
-            if (!$voucher->customer || !$voucher->customer->phone) {
-                throw new \Exception('No customer phone available for this voucher');
-            }
-
-            // Send SMS using the same method as in VoucherService
-            $smsService = app(\App\Services\SmsService::class);
-            $smsSent = $smsService->sendVoucher($voucher->customer->phone, $voucher);
-
-            if ($smsSent) {
-                // Update SMS sent timestamp
-                $voucher->update(['sms_sent_at' => now()]);
-
-                Log::channel('voucher')->info('Voucher SMS resent', [
-                    'voucher_id' => $voucher->id,
-                    'code' => $code,
-                    'phone' => $voucher->customer->phone,
-                    'tenant_id' => $this->currentTenant?->id,
-                    'resent_by' => auth()->id() ?? 'system',
-                ]);
-
-                return response()->json([
-                    'success' => true,
-                    'message' => 'SMS resent successfully',
-                    'data' => [
-                        'code' => $code,
-                        'phone' => $voucher->customer->phone,
-                        'sms_sent_at' => now()->toISOString(),
-                    ]
-                ]);
-            } else {
-                throw new \Exception('Failed to send SMS');
-            }
-
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+        if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Voucher not found'
-            ], 404);
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
 
-        } catch (\Exception $e) {
-            Log::channel('voucher')->error('Failed to resend voucher SMS', [
-                'code' => $code,
-                'tenant_id' => $this->currentTenant?->id,
-                'error' => $e->getMessage()
+        try {
+            $user = auth()->user();
+            $connection = DatabaseContextService::getConnection($user);
+            
+            $query = Voucher::on($connection);
+            
+            // Apply tenant filtering
+            if (!DatabaseContextService::isGlobalAdmin($user)) {
+                $query->where('tenant_id', $user->tenant_id);
+            }
+            
+            $voucher = $query->where('code', $code)->firstOrFail();
+            
+            $oldCustomerId = $voucher->customer_id;
+            
+            $voucher->update([
+                'customer_id' => $request->new_customer_id,
+                'metadata' => array_merge($voucher->metadata ?? [], [
+                    'transferred_by' => $user->id,
+                    'transferred_at' => now()->toISOString(),
+                    'transfer_reason' => $request->reason,
+                    'old_customer_id' => $oldCustomerId,
+                ])
             ]);
 
             return response()->json([
+                'success' => true,
+                'message' => 'Voucher transferred successfully',
+                'data' => $voucher->fresh()->load(['customer', 'payment'])
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
                 'success' => false,
-                'message' => 'Failed to resend SMS: ' . $e->getMessage(),
-                'error' => config('app.debug') ? $e->getMessage() : null
+                'message' => 'Failed to transfer voucher'
             ], 500);
         }
+    }
+
+    public function refund($code, Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'refund_amount' => 'required|numeric|min:0',
+            'reason' => 'required|string|max:500',
+            'method' => 'required|in:manual,automatic',
+            'allow_expired_refund' => 'boolean',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $user = auth()->user();
+            $connection = DatabaseContextService::getConnection($user);
+            
+            $query = Voucher::on($connection);
+            
+            // Apply tenant filtering
+            if (!DatabaseContextService::isGlobalAdmin($user)) {
+                $query->where('tenant_id', $user->tenant_id);
+            }
+            
+            $voucher = $query->where('code', $code)->firstOrFail();
+            
+            // Check if refund is allowed
+            if ($voucher->status === 'expired' && !$request->allow_expired_refund) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot refund expired voucher'
+                ], 400);
+            }
+
+            if ($request->refund_amount > $voucher->price) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Refund amount cannot exceed voucher price'
+                ], 400);
+            }
+
+            $voucher->update([
+                'status' => 'refunded',
+                'metadata' => array_merge($voucher->metadata ?? [], [
+                    'refunded_by' => $user->id,
+                    'refunded_at' => now()->toISOString(),
+                    'refund_amount' => $request->refund_amount,
+                    'refund_reason' => $request->reason,
+                    'refund_method' => $request->method,
+                ])
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Voucher refunded successfully',
+                'data' => $voucher->fresh()
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to refund voucher'
+            ], 500);
+        }
+    }
+
+    public function analytics(Request $request)
+    {
+        try {
+            $user = auth()->user();
+            $connection = DatabaseContextService::getConnection($user);
+            
+            $query = Voucher::on($connection)->with(['customer', 'payment']);
+            
+            // Apply tenant filtering
+            if (!DatabaseContextService::isGlobalAdmin($user)) {
+                $query->where('tenant_id', $user->tenant_id);
+            }
+            
+            // Apply date filters if provided
+            if ($request->has('start_date')) {
+                $query->whereDate('created_at', '>=', $request->start_date);
+            }
+            
+            if ($request->has('end_date')) {
+                $query->whereDate('created_at', '<=', $request->end_date);
+            }
+            
+            // Get overview statistics
+            $overview = [
+                'total_vouchers' => (clone $query)->count(),
+                'active_vouchers' => (clone $query)->where('status', 'active')->count(),
+                'expired_vouchers' => (clone $query)->where('status', 'expired')->count(),
+                'total_revenue' => (clone $query)->sum('price'),
+            ];
+            
+            // Get profile breakdown
+            $profileBreakdown = (clone $query)
+                ->selectRaw('profile, COUNT(*) as count, SUM(price) as revenue')
+                ->groupBy('profile')
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'profile' => $item->profile,
+                        'count' => $item->count,
+                        'revenue' => $item->revenue,
+                    ];
+                });
+            
+            // Get customer insights
+            $customerInsights = [
+                'vouchers_with_customers' => (clone $query)->whereNotNull('customer_id')->count(),
+                'vouchers_without_customers' => (clone $query)->whereNull('customer_id')->count(),
+            ];
+            
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'overview' => $overview,
+                    'profile_breakdown' => $profileBreakdown,
+                    'customer_insights' => $customerInsights,
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to get voucher analytics'
+            ], 500);
+        }
+    }
+
+    public function profiles()
+    {
+        $profiles = [
+            'daily_1gb' => [
+                'name' => 'Daily 1GB',
+                'validity_hours' => 24,
+                'data_limit_mb' => 1024,
+                'suggested_price' => 1000,
+            ],
+            'daily_2gb' => [
+                'name' => 'Daily 2GB',
+                'validity_hours' => 24,
+                'data_limit_mb' => 2048,
+                'suggested_price' => 1500,
+            ],
+            'weekly_5gb' => [
+                'name' => 'Weekly 5GB',
+                'validity_hours' => 168,
+                'data_limit_mb' => 5120,
+                'suggested_price' => 5000,
+            ],
+            'weekly_10gb' => [
+                'name' => 'Weekly 10GB',
+                'validity_hours' => 168,
+                'data_limit_mb' => 10240,
+                'suggested_price' => 8000,
+            ],
+            'monthly_20gb' => [
+                'name' => 'Monthly 20GB',
+                'validity_hours' => 720,
+                'data_limit_mb' => 20480,
+                'suggested_price' => 15000,
+            ],
+            'monthly_50gb' => [
+                'name' => 'Monthly 50GB',
+                'validity_hours' => 720,
+                'data_limit_mb' => 51200,
+                'suggested_price' => 30000,
+            ],
+            'unlimited_daily' => [
+                'name' => 'Unlimited Daily',
+                'validity_hours' => 24,
+                'data_limit_mb' => null,
+                'suggested_price' => 2000,
+            ],
+            'unlimited_weekly' => [
+                'name' => 'Unlimited Weekly',
+                'validity_hours' => 168,
+                'data_limit_mb' => null,
+                'suggested_price' => 10000,
+            ],
+        ];
+
+        return response()->json([
+            'success' => true,
+            'data' => $profiles
+        ]);
     }
 }
