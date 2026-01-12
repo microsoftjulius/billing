@@ -24,6 +24,13 @@
           Bulk Generate
         </button>
         <button 
+          @click="showRouterModal = true"
+          class="btn btn-secondary"
+        >
+          <i class="icon-router"></i>
+          Add Router
+        </button>
+        <button 
           @click="showAnalyticsModal = true"
           class="btn btn-secondary"
         >
@@ -738,6 +745,13 @@
       </div>
     </Modal>
 
+    <!-- Router Add Modal -->
+    <RouterAddModal 
+      :show="showRouterModal"
+      @close="showRouterModal = false"
+      @success="handleRouterAdded"
+    />
+
     <!-- Loading Overlay -->
     <LoadingOverlay v-if="isLoading && vouchers.length === 0" />
   </div>
@@ -750,6 +764,7 @@ import { useAppStore } from '@/store/modules/app'
 import DataTable from '@/components/common/DataTable.vue'
 import Modal from '@/components/common/Modal.vue'
 import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
+import RouterAddModal from '@/components/common/RouterAddModal.vue'
 import api from '@/api/client'
 import { debounce } from 'lodash-es'
 
@@ -841,6 +856,7 @@ const isSendingSms = ref<Record<string, boolean>>({})
 const showBulkGenerateModal = ref(false)
 const showAdvancedGenerateModal = ref(false)
 const showAnalyticsModal = ref(false)
+const showRouterModal = ref(false)
 const showTransferModal = ref(false)
 const showRefundModal = ref(false)
 const showDetailsModal = ref(false)
@@ -1404,6 +1420,15 @@ const loadAnalytics = async () => {
 const showAnalytics = async () => {
   showAnalyticsModal.value = true
   await loadAnalytics()
+}
+
+// Router management
+const handleRouterAdded = (router: any) => {
+  console.log('Router added successfully:', router)
+  appStore.addNotification({
+    type: 'success',
+    message: `Router "${router.name}" has been added successfully!`
+  })
 }
 
 // Utility functions

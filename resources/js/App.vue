@@ -3,11 +3,6 @@
         <router-view />
         <NotificationCenter />
         <LoadingOverlay :active="isLoading" />
-        
-        <!-- Connection Status Indicator -->
-        <div class="connection-status-container">
-            <ConnectionStatus />
-        </div>
     </div>
 </template>
 
@@ -19,7 +14,6 @@ import { webSocketService } from '@/services/websocket'
 import { setupGlobalErrorHandling } from '@/services/errorHandler'
 import NotificationCenter from '@/components/common/NotificationCenter.vue'
 import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
-import ConnectionStatus from '@/components/common/ConnectionStatus.vue'
 
 const appStore = useAppStore()
 const { currentTheme, isLoading } = storeToRefs(appStore)
@@ -409,19 +403,4 @@ textarea:focus-visible {
     font-size: 1rem;
 }
 
-/* Connection Status Container */
-.connection-status-container {
-    position: fixed;
-    top: var(--spacing-md);
-    right: var(--spacing-md);
-    z-index: 1000;
-    pointer-events: auto;
-}
-
-@media (max-width: 768px) {
-    .connection-status-container {
-        top: var(--spacing-sm);
-        right: var(--spacing-sm);
-    }
-}
 </style>

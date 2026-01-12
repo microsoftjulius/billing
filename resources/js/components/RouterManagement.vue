@@ -435,7 +435,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue';
+import { ref, computed, onMounted, reactive, nextTick } from 'vue';
 import { useAppStore } from '@/store/modules/app';
 import Modal from '@/components/common/Modal.vue';
 import type { MikroTikDevice } from '@/types';
@@ -792,10 +792,18 @@ const changePage = async (page: number): Promise<void> => {
 };
 
 const openAddRouterModal = (): void => {
+  console.log('openAddRouterModal called');
+  console.log('Current showRouterModal value:', showRouterModal.value);
   isEditing.value = false;
   editingRouter.value = null;
   resetForm();
   showRouterModal.value = true;
+  console.log('showRouterModal set to:', showRouterModal.value);
+  
+  // Force reactivity update
+  nextTick(() => {
+    console.log('After nextTick, showRouterModal:', showRouterModal.value);
+  });
 };
 
 const editRouter = (router: MikroTikDevice): void => {
@@ -888,32 +896,32 @@ onMounted(async () => {
 }
 
 .btn-primary {
-  background-color: var(--primary-color);
+  background-color: var(--primary-color, #3b82f6);
   color: white;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: var(--primary-color-dark);
+  background-color: var(--primary-color-dark, #2563eb);
 }
 
 .btn-secondary {
-  background-color: var(--background-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
+  background-color: var(--background-secondary, #1f2937);
+  color: var(--text-primary, #f9fafb);
+  border: 1px solid var(--border-color, #374151);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background-color: var(--background-tertiary);
+  background-color: var(--background-tertiary, #374151);
 }
 
 .btn-outline {
   background-color: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
+  border: 1px solid var(--border-color, #374151);
+  color: var(--text-primary, #f9fafb);
 }
 
 .btn-outline:hover:not(:disabled) {
-  background-color: var(--background-secondary);
+  background-color: var(--background-secondary, #1f2937);
 }
 
 .btn-danger {
@@ -1232,25 +1240,25 @@ onMounted(async () => {
 
 .form-input {
   padding: 0.75rem;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-color, #374151);
   border-radius: 0.375rem;
-  background: var(--background-primary);
-  color: var(--text-primary);
+  background: var(--background-primary, #111827);
+  color: var(--text-primary, #f9fafb);
   transition: border-color 0.2s;
 }
 
 .form-input:focus {
   outline: none;
-  border-color: var(--primary-color);
+  border-color: var(--primary-color, #3b82f6);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .form-input.error {
-  border-color: #ef4444;
+  border-color: var(--error-color, #ef4444);
 }
 
 .error-message {
-  color: #ef4444;
+  color: var(--error-color, #ef4444);
   font-size: 0.75rem;
 }
 
